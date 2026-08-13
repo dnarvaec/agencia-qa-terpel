@@ -1,0 +1,31 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (contienen credenciales/secretos)
+.env
+
+# Playwright: resultados, reportes HTML y trazas
+test-results/
+automatizacion web/test-results/
+automatizacion web/reports/
+playwright-report/
+playwright/.cache/
+blob-report/
+
+# Playwright MCP (capturas y logs de exploración en vivo)
+.playwright-mcp/
+
+# Graphify (cache y artefactos de análisis de código generados)
+.graphify/
+automatizacion web/.graphify/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Archivos de SO/editor
+.DS_Store
+Thumbs.db
+
+# graphify-axet
+.graphify/
