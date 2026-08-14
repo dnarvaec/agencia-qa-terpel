@@ -2,50 +2,8 @@
 /**
  * fabricClient.js
  * Proxy hacia la Fabric REST API usando las credenciales SP del .env.
- * No requiere dependencias externas — usa el módulo https nativo de Node.
  */
-const https = require('https');
-
-// ── HTTP helpers ──────────────────────────────────────────────────────────────
-function post(url, body) {
-  return new Promise((resolve, reject) => {
-    const data = Object.entries(body)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join('&');
-    const u = new URL(url);
-    const req = https.request(
-      { hostname: u.hostname, path: u.pathname, method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(data) } },
-      (res) => { let r = ''; res.on('data', d => r += d); res.on('end', () => { try { resolve(JSON.parse(r)); } catch { resolve(r); } }); }
-    );
-    req.on('error', reject); req.write(data); req.end();
-  });
-}
-
-function get(url, token) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = https.request(
-      { hostname: u.hostname, path: u.pathname + (u.search || ''), method: 'GET',
-        headers: { Authorization: `Bearer ${token}` } },
-      (res) => { let r = ''; res.on('data', d => r += d); res.on('end', () => { try { resolve({ status: res.statusCode, body: JSON.parse(r) }); } catch { resolve({ status: res.statusCode, body: r }); } }); }
-    );
-    req.on('error', reject); req.end();
-  });
-}
-
-function postJson(url, token, body) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body || {});
-    const u = new URL(url);
-    const req = https.request(
-      { hostname: u.hostname, path: u.pathname + (u.search || ''), method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },
-      (res) => { let r = ''; res.on('data', d => r += d); res.on('end', () => { try { resolve({ status: res.statusCode, body: r ? JSON.parse(r) : {} }); } catch { resolve({ status: res.statusCode, body: r }); } }); }
-    );
-    req.on('error', reject); req.write(data); req.end();
-  });
-}
+const { postForm, get, postJson } = require('./httpClient');
 
 // ── Token con caché (55 min) ──────────────────────────────────────────────────
 let _token = null, _exp = 0;
@@ -53,7 +11,7 @@ async function getToken() {
   if (_token && Date.now() < _exp) return _token;
   const { AZURE_TENANT_ID: tid, AZURE_CLIENT_ID: cid, AZURE_CLIENT_SECRET: cs } = process.env;
   if (!tid || !cid || !cs) throw new Error('Faltan AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET en .env');
-  const res = await post(`https://login.microsoftonline.com/${tid}/oauth2/v2.0/token`,
+  const res = await postForm(`https://login.microsoftonline.com/${tid}/oauth2/v2.0/token`,
     { client_id: cid, client_secret: cs, scope: 'https://api.fabric.microsoft.com/.default', grant_type: 'client_credentials' });
   if (!res.access_token) throw new Error('Token Fabric no obtenido: ' + JSON.stringify(res));
   _token = res.access_token;

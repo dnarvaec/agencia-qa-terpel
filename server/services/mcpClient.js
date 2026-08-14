@@ -64,9 +64,21 @@ class MCPClient {
         } catch (_) { /* ignorar líneas no-JSON */ }
       });
 
-      // Loguear stderr sin fallar (los servidores MCP usan stderr para info)
+      // Inicializar en cuanto el servidor produce output (stderr = señal de vida)
+      // o tras el timeout máximo. Flag `initialized` garantiza una sola llamada.
+      const MCP_START_DELAY_MS = parseInt(process.env.MCP_START_DELAY_MS || '1500', 10);
+      let initialized = false;
+      const doInit = () => {
+        if (initialized) return;
+        initialized = true;
+        clearTimeout(startTimer);
+        this._initialize().then(() => resolve(this)).catch(reject);
+      };
+      const startTimer = setTimeout(doInit, MCP_START_DELAY_MS);
+
       this.process.stderr.on('data', (chunk) => {
         process.stderr.write(`[MCP:${this.name}] ${chunk}`);
+        doInit();
       });
 
       this.process.on('error', (err) => {
@@ -82,11 +94,6 @@ class MCPClient {
         }
         this.pending.clear();
       });
-
-      // Esperar un momento y luego inicializar el handshake MCP
-      setTimeout(() => {
-        this._initialize().then(() => resolve(this)).catch(reject);
-      }, 800);
     });
   }
 

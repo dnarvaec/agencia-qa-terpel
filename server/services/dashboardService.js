@@ -82,8 +82,8 @@ function getDashboardData() {
     }
   };
 
-  // 1. Escanear tests/HUs
-  const husDir = path.join(rootDir, 'tests/HUs');
+  // 1. Escanear archivos/HUs
+  const husDir = path.join(rootDir, 'archivos/HUs');
   if (fs.existsSync(husDir)) {
     try {
       const folders = fs.readdirSync(husDir);
@@ -108,12 +108,12 @@ function getDashboardData() {
         }
       });
     } catch (e) {
-      console.error('Error escaneando tests/HUs:', e.message);
+      console.error('Error escaneando archivos/HUs:', e.message);
     }
   }
 
-  // 2. Escanear tests/Casos de prueba
-  const casosDir = path.join(rootDir, 'tests/Casos de prueba');
+  // 2. Escanear archivos/Casos de Prueba
+  const casosDir = path.join(rootDir, 'archivos/Casos de Prueba');
   if (fs.existsSync(casosDir)) {
     try {
       const subfolders = fs.readdirSync(casosDir);
@@ -128,13 +128,13 @@ function getDashboardData() {
         }
       });
     } catch (e) {
-      console.error('Error escaneando tests/Casos de prueba:', e.message);
+      console.error('Error escaneando archivos/Casos de Prueba:', e.message);
     }
   }
 
-  // 3. Escanear bugs/defectos en tests/Seguimiento
+  // 3. Escanear bugs/defectos en archivos/Seguimiento
   const allBugs = [];
-  const seguimientoDir = path.join(rootDir, 'tests/Seguimiento');
+  const seguimientoDir = path.join(rootDir, 'archivos/Seguimiento');
   if (fs.existsSync(seguimientoDir)) {
     try {
       const rpts = fs.readdirSync(seguimientoDir);
@@ -241,4 +241,44 @@ function getDashboardData() {
   };
 }
 
-module.exports = { getDashboardData };
+module.exports = { getDashboardData, parseMarkdownHU };
+
+function parseMarkdownHU(mdContent) {
+  const hu = {
+    story_id: '', story_title: '', story_description: '',
+    acceptance_criteria: [], score_initial: 0, score_final: 0,
+    iterations_count: 1, key_improvements: ''
+  };
+
+  const titleMatch = mdContent.match(/^##\s+(.+)$/m);
+  if (titleMatch) hu.story_title = titleMatch[1].trim();
+
+  const idMatch = mdContent.match(/### Story ID\r?\n(\d+)/i);
+  if (idMatch) hu.story_id = idMatch[1].trim();
+
+  const descStart = mdContent.indexOf('### Descripción');
+  if (descStart !== -1) {
+    const next = mdContent.indexOf('###', descStart + 15);
+    hu.story_description = mdContent.substring(descStart + 15, next !== -1 ? next : mdContent.length).trim();
+  }
+
+  const caStart = mdContent.indexOf('### Criterios de Aceptación');
+  if (caStart !== -1) {
+    const next = mdContent.indexOf('###', caStart + 27);
+    mdContent.substring(caStart + 27, next !== -1 ? next : mdContent.length).trim()
+      .split('\n')
+      .forEach(line => {
+        const clean = line.replace(/^\d+\.\s+/, '').replace(/^-\s+/, '').trim();
+        if (clean) hu.acceptance_criteria.push(clean);
+      });
+  }
+
+  const m = (re) => { const r = mdContent.match(re); return r ? parseInt(r[1], 10) : undefined; };
+  hu.score_initial   = m(/\*\*Score Inicial:\*\*\s*(\d+)/i) ?? 0;
+  hu.score_final     = m(/\*\*Score Final:\*\*\s*(\d+)/i)   ?? 0;
+  hu.iterations_count = m(/\*\*Iteraciones:\*\*\s*(\d+)/i)  ?? 1;
+  const improv = mdContent.match(/\*\*Cambios Principales:\*\*\s*(.+)/i);
+  if (improv) hu.key_improvements = improv[1].trim();
+
+  return hu;
+}

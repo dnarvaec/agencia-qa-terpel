@@ -56,13 +56,24 @@ function resolveEnvVars(text) {
   });
 }
 
+let _agentsCache = null;
+let _agentsCacheAt = 0;
+const AGENTS_CACHE_TTL_MS = 30_000;
+
+let _skillsCache = null;
+let _skillsCacheAt = 0;
+const SKILLS_CACHE_TTL_MS = 30_000;
+
 /**
  * Devuelve todos los agentes definidos en .github/agents/*.agent.md
  */
 function getAgents() {
+  const now = Date.now();
+  if (_agentsCache && now - _agentsCacheAt < AGENTS_CACHE_TTL_MS) return _agentsCache;
+
   if (!fs.existsSync(AGENTS_DIR)) return [];
 
-  return fs
+  _agentsCache = fs
     .readdirSync(AGENTS_DIR)
     .filter((f) => f.endsWith('.agent.md'))
     .map((f) => {
@@ -70,9 +81,15 @@ function getAgents() {
       const raw      = fs.readFileSync(filePath, 'utf8');
       const parsed   = parseFrontmatter(raw);
       if (!parsed) return null;
-      return { id: path.basename(f, '.agent.md'), filePath, ...parsed };
+      const agent = { id: path.basename(f, '.agent.md'), filePath, ...parsed };
+      // fullText precalculado para evitar recompute en cada ejecución del agente
+      agent.fullText = ((parsed.systemPrompt || '') + ' ' + (parsed.description || '')).toLowerCase();
+      return agent;
     })
     .filter((a) => a && !a.hidden);
+
+  _agentsCacheAt = now;
+  return _agentsCache;
 }
 
 /**
@@ -92,9 +109,12 @@ function getAgent(agentIdOrName) {
  * Devuelve todas las skills disponibles en .github/skills/<skillName>/SKILL.md
  */
 function getSkills() {
+  const now = Date.now();
+  if (_skillsCache && now - _skillsCacheAt < SKILLS_CACHE_TTL_MS) return _skillsCache;
+
   if (!fs.existsSync(SKILLS_DIR)) return [];
 
-  return fs
+  _skillsCache = fs
     .readdirSync(SKILLS_DIR)
     .filter((d) => {
       const fullPath = path.join(SKILLS_DIR, d);
@@ -117,6 +137,9 @@ function getSkills() {
       };
     })
     .filter(Boolean);
+
+  _skillsCacheAt = now;
+  return _skillsCache;
 }
 
 /**

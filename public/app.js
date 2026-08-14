@@ -53,7 +53,9 @@ const SPINNER_LABELS = {
 };
 
 // Solo estos tipos generan cards en el feed
-const FEED_TYPES = new Set(['assistant', 'tool-call', 'tool-error', 'warning']);
+const FEED_TYPES = new Set(['assistant', 'tool-call', 'tool-error', 'warning', 'tokens']);
+
+const TOKEN_RE = /Tokens totales:.*TOTAL=(\d+)/i;
 
 function friendlyToolMessage(rawMessage) {
   const m = rawMessage.toLowerCase();
@@ -73,6 +75,19 @@ function friendlyToolMessage(rawMessage) {
 
 function handleProgress(event) {
   const { type, message } = event;
+
+  // Mostrar resumen de tokens al recibir el evento info con totales
+  if (type === 'info' && TOKEN_RE.test(message)) {
+    const match = message.match(/prompt=(\d+).*completion=(\d+).*TOTAL=(\d+)/i);
+    if (match) {
+      const item = document.createElement('div');
+      item.className = 'feed-item feed-item--tokens';
+      item.innerHTML = `<div class="feed-item__icon">📊</div><div class="feed-item__text">Tokens usados: ${Number(match[3]).toLocaleString('es-CO')} (prompt: ${Number(match[1]).toLocaleString('es-CO')} • respuesta: ${Number(match[2]).toLocaleString('es-CO')})</div>`;
+      activityFeed.appendChild(item);
+      activityFeed.scrollTop = activityFeed.scrollHeight;
+    }
+    return;
+  }
 
   // Actualizar label del spinner
   if (SPINNER_LABELS[type]) {
@@ -111,22 +126,30 @@ function handleProgress(event) {
 }
 
 // -- Load Agents --------------------------------------------------------------
-async function loadAgents() {
-  try {
-    const res = await fetch('/api/agents');
-    agents    = await res.json();
+async function loadAgents(retries = 3, delayMs = 2000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch('/api/agents');
+      agents    = await res.json();
 
-    agentSelect.innerHTML = '<option value="">— Selecciona un agente —</option>';
-    for (const a of agents) {
-      const opt       = document.createElement('option');
-      opt.value       = a.id;
-      opt.textContent = a.name;
-      agentSelect.appendChild(opt);
+      agentSelect.innerHTML = '<option value="">\u2014 Selecciona un agente \u2014</option>';
+      for (const a of agents) {
+        const opt       = document.createElement('option');
+        opt.value       = a.id;
+        opt.textContent = a.name;
+        agentSelect.appendChild(opt);
+      }
+      agentSelect.disabled = false;
+      return;
+    } catch (err) {
+      if (attempt < retries) {
+        agentSelect.innerHTML = `<option value="">Conectando\u2026 (intento ${attempt}/${retries})</option>`;
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        agentSelect.innerHTML = '<option value="">Error al cargar agentes \u2014 recarga la p\u00e1gina</option>';
+        console.error('loadAgents fallido tras', retries, 'intentos:', err);
+      }
     }
-    agentSelect.disabled = false;
-  } catch (err) {
-    agentSelect.innerHTML = '<option value="">Error al cargar agentes</option>';
-    console.error(err);
   }
 }
 
@@ -170,8 +193,7 @@ function renderAgentCard(agent) {
 runBtn.addEventListener('click', startRun);
 
 stopBtn.addEventListener('click', () => {
-  socket.disconnect();
-  setTimeout(() => socket.connect(), 300);
+  socket.emit('cancel-agent');
   finishRun(false, 'Ejecución cancelada por el usuario.');
 });
 
@@ -386,6 +408,7 @@ async function loadDashboard() {
 
   } catch (err) {
     console.error('Error al actualizar dashboard:', err);
+    dashHuList.innerHTML = `<li class="hu-item hu-item--empty">⚠️ Error al cargar datos: ${escHtml(err.message)}. Verifica que el servidor esté activo.</li>`;
   }
 }
 

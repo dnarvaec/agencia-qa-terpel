@@ -28,6 +28,73 @@ const MAX_ITERATIONS = 70;
  */
 const MAX_TOOL_RESULT_LLM_CHARS = 300000;
 
+// Constantes estáticas a nivel módulo — evitan reconstrucción en cada llamada a runAgent
+const AZDEVOPS_SUBCATEGORY_KEYWORDS = {
+  wit:       ['work item', 'historia', 'user story', 'backlog', 'historias de usuario', 'hu '],
+  testplan:  ['test plan', 'test case', 'caso de prueba', 'casos de prueba', 'plan de prueba', 'test suite'],
+  repo:      ['repositori', 'branch', 'pull request', 'commit', 'código fuente', 'rama'],
+  pipelines: ['pipeline', 'build', 'ci/cd', 'deployment', 'compilación'],
+  wiki:      ['wiki'],
+  work:      ['iteration', 'sprint', 'capacidad del equipo', 'team capacity'],
+  search:    ['search_code', 'search_wiki', 'search_workitem', 'buscar en wiki'],
+  core:      ['listar proyectos', 'core_list', 'core_get'],
+  advsec:    ['advsec', 'security alert', 'vulnerabilidad'],
+};
+
+const TOOL_NAME_MAP = [
+  [/\bedit\/createFile\b/g,                 'workspace__writeFile'],
+  [/\bedit\/editFiles\b/g,                  'workspace__writeFile'],
+  [/\bedit\/createDirectory\b/g,            'workspace__createDirectory'],
+  [/\bedit\/rename\b/g,                     'workspace__renameFile'],
+  [/\bread\/readFile\b/g,                   'workspace__readFile'],
+  [/\bread\/getFile\b/g,                    'workspace__readFile'],
+  [/\bsearch\/listDirectory\b/g,            'workspace__listDirectory'],
+  [/\bsearch\/fileSearch\b/g,               'workspace__fileSearch'],
+  [/\bsearch\/textSearch\b/g,               'workspace__textSearch'],
+  [/\bsearch\/codebase\b/g,                 'workspace__textSearch'],
+  [/\bweb\/fetch\b/g,                       'workspace__fetchUrl'],
+  [/\bread\/viewImage\b/g,                  '(no disponible en este runtime)'],
+  [/\bread\/problems\b/g,                   '(no disponible en este runtime)'],
+  [/\bread\/readNotebookCellOutput\b/g,      '(no disponible en este runtime)'],
+  [/\bread\/getNotebookSummary\b/g,          '(no disponible en este runtime)'],
+  [/\bedit\/createJupyterNotebook\b/g,      '(no disponible en este runtime)'],
+  [/\bedit\/editNotebook\b/g,               '(no disponible en este runtime)'],
+  [/\bsearch\/usages\b/g,                   '(no disponible en este runtime)'],
+];
+
+const COMPLEX_FILTER_SERVERS = new Set(['azure-devops']);
+
+const PREFIX_MAP = {
+  start:        '[AGENTE]  ',
+  info:         '[INFO]    ',
+  mcp:          '[MCP]     ',
+  'mcp-ready':  '[MCP]     ',
+  thinking:     '[LLM]     ',
+  assistant:    '[RESPUESTA]',
+  tools:        '[TOOLS]   ',
+  'tool-call':  '[TOOL →]  ',
+  'tool-result':'[TOOL ←] ',
+  'tool-error': '[TOOL ❌] ',
+  complete:     '[DONE]    ',
+  warning:      '[WARN]    ',
+  error:        '[ERROR]   ',
+};
+
+// Singleton con inicialización diferida — las vars de entorno están disponibles al arrancar
+let _openaiClient = null;
+function getOpenAIClient() {
+  if (!_openaiClient) {
+    const apiKey    = process.env.AZURE_OPENAI_API_KEY;
+    const endpoint  = process.env.AZURE_OPENAI_ENDPOINT;
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION;
+    if (!apiKey || !endpoint || !apiVersion) {
+      throw new Error('Faltan variables de entorno de Azure OpenAI (API_KEY, ENDPOINT, API_VERSION).');
+    }
+    _openaiClient = new AzureOpenAI({ apiKey, endpoint, apiVersion, timeout: 180_000 });
+  }
+  return _openaiClient;
+}
+
 /**
  * Limpia HTML básico dejando solo texto plano.
  * Útil para respuestas de Azure DevOps que devuelven campos con HTML.
@@ -91,21 +158,7 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   // ── Wrap onProgress para duplicar todos los eventos a la consola del servidor ──
   const _emit = onProgress;
   onProgress = (event) => {
-    const prefix = {
-      start:       '[AGENTE]  ',
-      info:        '[INFO]    ',
-      mcp:         '[MCP]     ',
-      'mcp-ready': '[MCP]     ',
-      thinking:    '[LLM]     ',
-      assistant:   '[RESPUESTA]',
-      tools:       '[TOOLS]   ',
-      'tool-call': '[TOOL →]  ',
-      'tool-result':'[TOOL ←] ',
-      'tool-error': '[TOOL ❌] ',
-      complete:    '[DONE]    ',
-      warning:     '[WARN]    ',
-      error:       '[ERROR]   ',
-    }[event.type] || '[LOG]     ';
+    const prefix = PREFIX_MAP[event.type] || '[LOG]     ';
     console.log(`${prefix} ${event.message || JSON.stringify(event)}`);
     _emit(event);
   };
@@ -124,29 +177,17 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   // Estrategia de filtrado inteligente para el servidor (el YAML se mantiene intacto
   // para VS Code Copilot). Para cada servidor MCP declarado en el YAML:
   //
-  //   AZURE DEVOPS (90 tools): se aplica reducción en orden de prioridad:
+  //   AZURE DEVOPS (~40 tools): se aplica reducción en orden de prioridad:
   //     1. Menciones explícitas en el system prompt (azure-devops/wit_get_work_item)
   //     2. Subcategorías detectadas por keywords del prompt + descripción del agente
   //        (ej. "historia de usuario" → wit_*, "caso de prueba" → testplan_*)
   //     3. Fallback: todas las azure-devops del YAML (seguro, sin pérdida de funcionalidad)
 
-  // Palabras clave por subcategoría de Azure DevOps
-  const AZDEVOPS_SUBCATEGORY_KEYWORDS = {
-    wit: ['work item', 'historia', 'user story', 'backlog', 'historias de usuario', 'hu '],
-    testplan: ['test plan', 'test case', 'caso de prueba', 'casos de prueba', 'plan de prueba', 'test suite'],
-    repo: ['repositori', 'branch', 'pull request', 'commit', 'código fuente', 'rama'],
-    pipelines: ['pipeline', 'build', 'ci/cd', 'deployment', 'compilación'],
-    wiki: ['wiki'],
-    work: ['iteration', 'sprint', 'capacidad del equipo', 'team capacity'],
-    search: ['search_code', 'search_wiki', 'search_workitem', 'buscar en wiki'],
-    core: ['listar proyectos', 'core_list', 'core_get'],
-    advsec: ['advsec', 'security alert', 'vulnerabilidad'],
-  };
+  // Palabras clave por subcategoría — definidas a nivel módulo como AZDEVOPS_SUBCATEGORY_KEYWORDS
+  // agentFullText viene precalculado y cacheado en el objeto agente por agentReader
+  const agentFullText = agent.fullText;
 
-  const agentFullText = (agent.systemPrompt + ' ' + agent.description).toLowerCase();
-
-  // Servidores MCP que tienen lógica de filtrado especial
-  const COMPLEX_FILTER_SERVERS = new Set(['azure-devops']);
+  // Servidores MCP que tienen lógica de filtrado especial — COMPLEX_FILTER_SERVERS a nivel módulo
 
   // Servidores MCP usados por este agente (extraído del YAML) — todos los prefijos conocidos
   const yamlMcpServers = new Set(
@@ -169,7 +210,7 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
       if (actualTools.length > 0) {
         const actualNames = actualTools.map((t) => `${server}/${t.name}`);
         effectiveFilter.push(...actualNames);
-        console.log(`[agentRunner] Servidor '${server}': ${actualNames.length} tools reales del MCP → ${actualNames.join(', ')}`);
+        console.log(`[agentRunner] Servidor '${server}': ${actualNames.length} tools (${actualNames.slice(0, 5).join(', ')}${actualNames.length > 5 ? ` +${actualNames.length - 5} más` : ''})`);
       } else {
         // fallback: usar nombres del YAML si el MCP aún no reportó tools
         effectiveFilter.push(...yamlServerTools);
@@ -263,44 +304,13 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   });
 
   // ── 4. Crear cliente Azure OpenAI ──────────────────────────────────────────
-  const client = new AzureOpenAI({
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-    apiVersion: process.env.AZURE_OPENAI_API_VERSION,
-    timeout: 180_000,
-  });
+  const client = getOpenAIClient();
 
   const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   if (!deployment) throw new Error('Falta la variable de entorno AZURE_OPENAI_DEPLOYMENT.');
 
   // ── 5. Bucle agente ────────────────────────────────────────────────────────
-  // El systemPrompt del agente usa nombres de tools de VS Code (edit/createFile, etc.).
-  // Aquí los reemplazamos por los nombres reales disponibles en este runtime (workspace__*)
-  // para que el LLM lea instrucciones coherentes con las tools que realmente tiene.
-  const TOOL_NAME_MAP = [
-    // ── Herramientas de archivo ───────────────────────────────────────
-    [/\bedit\/createFile\b/g, 'workspace__writeFile'],
-    [/\bedit\/editFiles\b/g, 'workspace__writeFile'],
-    [/\bedit\/createDirectory\b/g, 'workspace__createDirectory'],
-    [/\bedit\/rename\b/g, 'workspace__renameFile'],
-    [/\bread\/readFile\b/g, 'workspace__readFile'],
-    [/\bread\/getFile\b/g, 'workspace__readFile'],
-    // ── Herramientas de búsqueda ───────────────────────────────────
-    [/\bsearch\/listDirectory\b/g, 'workspace__listDirectory'],
-    [/\bsearch\/fileSearch\b/g, 'workspace__fileSearch'],
-    [/\bsearch\/textSearch\b/g, 'workspace__textSearch'],
-    [/\bsearch\/codebase\b/g, 'workspace__textSearch'],   // búsqueda semántica → texto
-    // ── Web ─────────────────────────────────────────────────────
-    [/\bweb\/fetch\b/g, 'workspace__fetchUrl'],
-    [/\bread\/viewImage\b/g, '(no disponible en este runtime)'],
-    [/\bread\/problems\b/g, '(no disponible en este runtime)'],
-    [/\bread\/readNotebookCellOutput\b/g, '(no disponible en este runtime)'],
-    [/\bread\/getNotebookSummary\b/g, '(no disponible en este runtime)'],
-    [/\bedit\/createJupyterNotebook\b/g, '(no disponible en este runtime)'],
-    [/\bedit\/editNotebook\b/g, '(no disponible en este runtime)'],
-    [/\bsearch\/usages\b/g, '(no disponible en este runtime)'],
-  ];
-
+  // TOOL_NAME_MAP definida a nivel módulo — reemplaza nombres de tools de VS Code por workspace__*
   let resolvedPrompt = agent.systemPrompt;
   for (const [pattern, replacement] of TOOL_NAME_MAP) {
     resolvedPrompt = resolvedPrompt.replace(pattern, replacement);
@@ -541,17 +551,16 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
           } else {
             // ── MCP tool ─────────────────────────────────────────────────
             const raw = await mcpManager.callTool(toolCall.function.name, args);
-            
-            // DEBUG: Log respuesta RAW de cualquier herramienta azure devops
-            if (toolCall.function.name.includes('azure_devops') || toolCall.function.name.includes('azure-devops')) {
-              const rawStr = JSON.stringify(raw, null, 2);
-              console.log(`\n=== [${toolCall.function.name}] RAW RESPONSE (${rawStr.length} chars) ===`);
-              console.log(rawStr.substring(0, 8000));
-              if (rawStr.length > 8000) console.log(`... (${rawStr.length - 8000} caracteres más)`);
-              console.log('=================================\n');
-            }
-            
             const text = extractMCPText(raw);
+            // Volcar respuesta raw solo cuando DEBUG_MCP=true para evitar llenar logs en producción
+            if (process.env.DEBUG_MCP === 'true' &&
+                (toolCall.function.name.includes('azure_devops') || toolCall.function.name.includes('azure-devops'))) {
+              const rawStr = JSON.stringify(raw, null, 2);
+              console.log(`\n=== [${toolCall.function.name}] RAW (${rawStr.length} chars) ===`);
+              console.log(rawStr.substring(0, 4000));
+              if (rawStr.length > 4000) console.log(`... (+${rawStr.length - 4000} chars)`);
+              console.log('====\n');
+            }
             toolResultContent = text.length > MAX_TOOL_RESULT_LLM_CHARS
               ? text.substring(0, MAX_TOOL_RESULT_LLM_CHARS) +
               `\n[...resultado truncado: ${text.length - MAX_TOOL_RESULT_LLM_CHARS} caracteres omitidos]`

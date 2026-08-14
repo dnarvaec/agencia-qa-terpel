@@ -26,6 +26,7 @@ const { getSkillContent } = require('./agentReader');
 const { generateExcel } = require('./excelGenerator');
 
 const WORKSPACE_ROOT = path.resolve(__dirname, '../../');
+const MAX_READ_BYTES = 2 * 1024 * 1024; // archivos > 2 MB no se envían completos al LLM
 
 /**
  * Resuelve una ruta relativa al workspace y valida que esté dentro de él.
@@ -253,6 +254,10 @@ function readFile({ path: relativePath }) {
   if (!fs.existsSync(abs)) {
     throw new Error(`Archivo no encontrado: ${relativePath}`);
   }
+  const { size } = fs.statSync(abs);
+  if (size > MAX_READ_BYTES) {
+    return `[Archivo demasiado grande (${(size / 1024 / 1024).toFixed(1)} MB). Usa textSearch para buscar contenido específico.]`;
+  }
   return fs.readFileSync(abs, 'utf8');
 }
 
@@ -326,7 +331,7 @@ function fileSearch({ pattern }) {
     : '(no se encontraron archivos)';
 }
 
-function textSearch({ query, pattern = '**/*', maxResults = 20 }) {
+async function textSearch({ query, pattern = '**/*', maxResults = 20 }) {
   if (pattern.includes('..')) throw new Error('Patrón no permitido');
 
   const files = glob.sync(pattern, {
@@ -342,12 +347,13 @@ function textSearch({ query, pattern = '**/*', maxResults = 20 }) {
     if (results.length >= maxResults) break;
     const abs = path.join(WORKSPACE_ROOT, rel);
     try {
-      const lines = fs.readFileSync(abs, 'utf8').split('\n');
-      lines.forEach((line, idx) => {
-        if (results.length < maxResults && line.toLowerCase().includes(lowerQ)) {
-          results.push(`${rel}:${idx + 1}: ${line.trim()}`);
+      const content = await fs.promises.readFile(abs, 'utf8');
+      const lines = content.split('\n');
+      for (let idx = 0; idx < lines.length && results.length < maxResults; idx++) {
+        if (lines[idx].toLowerCase().includes(lowerQ)) {
+          results.push(`${rel}:${idx + 1}: ${lines[idx].trim()}`);
         }
-      });
+      }
     } catch (_) { /* archivo binario u otro error: ignorar */ }
   }
 
@@ -369,11 +375,15 @@ function fetchUrl({ url, method = 'GET' }) {
   // necesitan acceder a la app en desarrollo (localhost:4200, localhost:8080, etc.).
   const parsed = new URL(url);
   const host = parsed.hostname.toLowerCase();
-  if (
+  // Bloquear rangos privados completos (RFC 1918) + link-local (AWS metadata) + IPv6 loopback
+  const isPrivate =
     host.startsWith('192.168.') ||
     host.startsWith('10.') ||
-    host.startsWith('172.16.')
-  ) {
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    host.startsWith('169.254.') ||
+    host === '::1' ||
+    host === '0.0.0.0';
+  if (isPrivate) {
     throw new Error('No se permiten URLs a IPs de red privada.');
   }
 

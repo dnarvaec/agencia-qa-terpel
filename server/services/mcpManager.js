@@ -20,6 +20,11 @@ const MCP_SERVER_CONFIGS = {
     args:    ['.vscode/start-azure-devops-mcp.js'],
     cwd:     WORKSPACE_ROOT,
   },
+  'playwright': {
+    command: 'npx',
+    args:    ['@playwright/mcp@latest'],
+    cwd:     WORKSPACE_ROOT,
+  },
 };
 
 /**

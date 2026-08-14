@@ -561,10 +561,12 @@ body {
 .feed-item--tool  .feed-item__icon { background: var(--ntt-blue-dim);  color: var(--ntt-blue-light); }
 .feed-item--agent .feed-item__icon { background: var(--eco-green-dim); color: var(--eco-green-light); }
 .feed-item--warn  .feed-item__icon { background: rgba(227,165,25,.1);  color: var(--yellow); }
+.feed-item--tokens .feed-item__icon { background: rgba(120,120,120,.1); color: var(--text-2); }
 
 .feed-item__text { flex: 1; color: var(--text-1); }
 .feed-item--agent .feed-item__text { color: var(--text-0); font-weight: 500; }
 .feed-item--warn  .feed-item__text { color: var(--yellow); }
+.feed-item--tokens .feed-item__text { color: var(--text-2); font-size: 0.8rem; }
 
 /* Result */
 #activityResult {

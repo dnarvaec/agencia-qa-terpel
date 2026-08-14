@@ -1,88 +1,60 @@
 'use strict';
 
-const { spawnSync } = require('child_process');
-
-function escapeForPowerShellSingleQuoted(value) {
-  return String(value).replace(/'/g, "''");
-}
-
-function runPowerShell(script) {
-  const result = spawnSync(
-    'powershell',
-    ['-NoProfile', '-Command', script],
-    {
-      encoding: 'utf8',
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024,
-    }
-  );
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  const stdout = (result.stdout || '').trim();
-  const stderr = (result.stderr || '').trim();
-
-  if (result.status !== 0) {
-    throw new Error(stdout || stderr || `PowerShell finalizó con código ${result.status}.`);
-  }
-
-  return stdout;
-}
+const https = require('https');
 
 async function getWorkItemById({ id, project, fields, expand, asOf }) {
-  if (!id) {
-    throw new Error('El id del Work Item es obligatorio.');
-  }
-  if (!project) {
-    throw new Error('El project de Azure DevOps es obligatorio.');
-  }
+  if (!id) throw new Error('El id del Work Item es obligatorio.');
+  if (!project) throw new Error('El project de Azure DevOps es obligatorio.');
 
-  const extraQueryParts = [];
-  if (Array.isArray(fields) && fields.length > 0) {
-    extraQueryParts.push(`fields=${fields.join(',')}`);
-  }
-  if (expand) {
-    extraQueryParts.push(`$expand=${expand}`);
-  }
-  if (asOf) {
-    extraQueryParts.push(`asOf=${asOf}`);
-  }
+  const pat    = process.env.AZURE_DEVOPS_PAT;
+  const orgUrl = (process.env.AZURE_DEVOPS_ORG_URL || '').replace(/\/$/, '');
 
-  const script = `
-$ProgressPreference = 'SilentlyContinue'
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$envText = Get-Content .env -Raw
-if ($envText -match 'AZURE_DEVOPS_PAT=(.+)') { $pat = $Matches[1].Trim().Trim('"''') }
-if ($envText -match 'AZURE_DEVOPS_ORG_URL=(.+)') { $org = $Matches[1].Trim().Trim('"''').TrimEnd('/') }
-$proj = '${escapeForPowerShellSingleQuoted(project)}'
-$id = '${escapeForPowerShellSingleQuoted(id)}'
-$url = "$org/$proj/_apis/wit/workitems/${id}?api-version=7.1"
-if ('${escapeForPowerShellSingleQuoted(extraQueryParts.join('&'))}') {
-  $url = $url + '&' + '${escapeForPowerShellSingleQuoted(extraQueryParts.join('&'))}'
+  if (!pat)    throw new Error('AZURE_DEVOPS_PAT no está definido en .env');
+  if (!orgUrl) throw new Error('AZURE_DEVOPS_ORG_URL no está definido en .env');
+
+  // PAT codificado en base64 como ':PAT' — formato estándar de Basic auth de Azure DevOps
+  const token = Buffer.from(`:${pat}`).toString('base64');
+
+  const params = new URLSearchParams({ 'api-version': '7.1' });
+  if (Array.isArray(fields) && fields.length > 0) params.set('fields', fields.join(','));
+  if (expand) params.set('$expand', expand);
+  if (asOf)   params.set('asOf', asOf);
+
+  const url = new URL(
+    `${orgUrl}/${encodeURIComponent(project)}/_apis/wit/workitems/${encodeURIComponent(id)}?${params}`
+  );
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: url.hostname,
+        path:     url.pathname + url.search,
+        method:   'GET',
+        headers: {
+          'Authorization': `Basic ${token}`,
+          'Content-Type':  'application/json',
+        },
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (d) => body += d);
+        res.on('end', () => {
+          if (res.statusCode >= 400) {
+            reject(new Error(`Azure DevOps REST respondió ${res.statusCode}: ${body.substring(0, 300)}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(body));
+          } catch {
+            reject(new Error(`Respuesta REST no es JSON válido: ${body.substring(0, 300)}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
 }
-try {
-  $response = Invoke-WebRequest -Uri $url -Headers @{ Authorization = "Bearer $pat" } -UseBasicParsing
-  $response.Content
-} catch {
-  if ($_.Exception.Response) {
-    $status = [int]$_.Exception.Response.StatusCode.value__
-    throw ("Azure DevOps REST respondió " + $status + ": " + $_.Exception.Message)
-  }
-  throw $_.Exception.Message
-}
-`.trim();
 
-  const output = runPowerShell(script);
+module.exports = { getWorkItemById };
 
-  try {
-    return JSON.parse(output);
-  } catch (err) {
-    throw new Error(`No fue posible interpretar la respuesta REST como JSON: ${output.substring(0, 500)}`);
-  }
-}
-
-module.exports = {
-  getWorkItemById,
-};

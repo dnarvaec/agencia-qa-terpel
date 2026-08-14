@@ -10,91 +10,58 @@ const fs = require('fs');
 
 const { getAgents } = require('./services/agentReader');
 const { runAgent } = require('./services/agentRunner');
-const { getDashboardData } = require('./services/dashboardService');
+const { getDashboardData, parseMarkdownHU } = require('./services/dashboardService');
+const { generateExcel } = require('./services/excelGenerator');
 const MCPClient   = require('./services/mcpClient');
 const fabricClient = require('./services/fabricClient');
 const powerbiClient = require('./services/powerbiClient');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
+// CORS restringido a localhost; ampliar via AGENT_UI_ORIGIN en .env para acceso remoto
+const CORS_ORIGIN = process.env.AGENT_UI_ORIGIN || /^http:\/\/localhost(:\d+)?$/;
+const io = new Server(server, { cors: { origin: CORS_ORIGIN, methods: ['GET', 'POST'] } });
 
 const PORT = process.env.AGENT_UI_PORT || 3000;
+const WORKSPACE_ROOT = path.join(__dirname, '..');
+
+const MIME_TYPES = {
+  json: 'application/json; charset=utf-8',
+  md:   'text/markdown; charset=utf-8',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv:  'text/csv; charset=utf-8',
+  txt:  'text/plain; charset=utf-8',
+  html: 'text/html; charset=utf-8',
+};
+
+const MAX_PROMPT_LENGTH = 8000;
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ── REST ──────────────────────────────────────────────────────────────────────
+let _dashboardCache = null;
+let _dashboardCacheAt = 0;
+const DASHBOARD_TTL_MS = 5_000;
+
 app.get('/api/dashboard', (_req, res) => {
   try {
-    const data = getDashboardData();
-    res.json(data);
+    const now = Date.now();
+    if (!_dashboardCache || now - _dashboardCacheAt > DASHBOARD_TTL_MS) {
+      _dashboardCache = getDashboardData();
+      _dashboardCacheAt = now;
+    }
+    res.json(_dashboardCache);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-function parseMarkdownHU(mdContent) {
-  const hu = {
-    story_id: '',
-    story_title: '',
-    story_description: '',
-    acceptance_criteria: [],
-    score_initial: 0,
-    score_final: 0,
-    iterations_count: 1,
-    key_improvements: ''
-  };
-
-  // 1. Título e ID
-  const titleMatch = mdContent.match(/^##\s+(.+)$/m);
-  if (titleMatch) hu.story_title = titleMatch[1].trim();
-
-  const idMatch = mdContent.match(/### Story ID\r?\n(\d+)/i);
-  if (idMatch) hu.story_id = idMatch[1].trim();
-
-  // 2. Descripción
-  const descStartIndex = mdContent.indexOf('### Descripción');
-  if (descStartIndex !== -1) {
-    const nextSectionIndex = mdContent.indexOf('###', descStartIndex + 15);
-    const descSection = mdContent.substring(descStartIndex + 15, nextSectionIndex !== -1 ? nextSectionIndex : mdContent.length).trim();
-    hu.story_description = descSection;
-  }
-
-  // 3. Criterios de Aceptación
-  const criteriaStartIndex = mdContent.indexOf('### Criterios de Aceptación');
-  if (criteriaStartIndex !== -1) {
-    const nextSectionIndex = mdContent.indexOf('###', criteriaStartIndex + 27);
-    const criteriaSection = mdContent.substring(criteriaStartIndex + 27, nextSectionIndex !== -1 ? nextSectionIndex : mdContent.length).trim();
-    const lines = criteriaSection.split('\n');
-    lines.forEach(line => {
-      const cleanedLine = line.replace(/^\d+\.\s+/, '').replace(/^-\s+/, '').trim();
-      if (cleanedLine) hu.acceptance_criteria.push(cleanedLine);
-    });
-  }
-
-  // 4. Información de mejora
-  const scoreInitialMatch = mdContent.match(/\*\*Score Inicial:\*\*\s*(\d+)/i);
-  if (scoreInitialMatch) hu.score_initial = parseInt(scoreInitialMatch[1], 10);
-
-  const scoreFinalMatch = mdContent.match(/\*\*Score Final:\*\*\s*(\d+)/i);
-  if (scoreFinalMatch) hu.score_final = parseInt(scoreFinalMatch[1], 10);
-
-  const iterMatch = mdContent.match(/\*\*Iteraciones:\*\*\s*(\d+)/i);
-  if (iterMatch) hu.iterations_count = parseInt(iterMatch[1], 10);
-
-  const improvementsMatch = mdContent.match(/\*\*Cambios Principales:\*\*\s*(.+)/i);
-  if (improvementsMatch) hu.key_improvements = improvementsMatch[1].trim();
-
-  return hu;
-}
-
 app.get('/api/read-draft', (req, res) => {
   const { path: relPath } = req.query;
   if (!relPath) return res.status(400).json({ error: 'Falta el parámetro path.' });
 
-  const WORKSPACE_ROOT = path.join(__dirname, '..');
   const abs = path.resolve(WORKSPACE_ROOT, relPath);
   if (!abs.startsWith(WORKSPACE_ROOT + path.sep) && abs !== WORKSPACE_ROOT) {
     return res.status(403).json({ error: 'Acceso denegado.' });
@@ -132,7 +99,6 @@ app.post('/api/save-draft', async (req, res) => {
   const { path: relPath, content, agentId } = req.body;
   if (!relPath || !content) return res.status(400).json({ error: 'Faltan parámetros obligatorios.' });
 
-  const WORKSPACE_ROOT = path.join(__dirname, '..');
   const abs = path.resolve(WORKSPACE_ROOT, relPath);
   if (!abs.startsWith(WORKSPACE_ROOT + path.sep) && abs !== WORKSPACE_ROOT) {
     return res.status(403).json({ error: 'Acceso denegado.' });
@@ -146,8 +112,8 @@ app.post('/api/save-draft', async (req, res) => {
     const generatedFiles = [relPath];
 
     // 2. Si el agente es 'agente-excel', recompilar el Excel
-    if (agentId === 'agente-excel') {
-      const { generateExcel } = require('./services/excelGenerator');
+    const normalizedId = (agentId || '').toLowerCase().replace(/[\s]+/g, '-');
+    if (normalizedId === 'agente-excel') {
       const excelRelPath = relPath.replace(/\.json$/, '.xlsx');
       const absExcel = path.resolve(WORKSPACE_ROOT, excelRelPath);
       await generateExcel(absExcel, content);
@@ -155,7 +121,7 @@ app.post('/api/save-draft', async (req, res) => {
     }
 
     // 3. Si el agente es 'mejorar-hu', actualizar la descripción en el Markdown (.md)
-    if (agentId === 'mejorar-hu' || relPath.endsWith('-final.json')) {
+    if (normalizedId === 'mejorar-hu' || relPath.endsWith('-final.json')) {
       const mdRelPath = relPath.replace(/\.json$/, '.md');
       const absMd = path.resolve(WORKSPACE_ROOT, mdRelPath);
       const hu = content;
@@ -199,19 +165,18 @@ app.get('/api/download', (req, res) => {
   const { path: relPath } = req.query;
   if (!relPath) return res.status(400).json({ error: 'Falta el parámetro path.' });
 
-  // Seguridad: normalizar y verificar que la ruta quede dentro del workspace
-  const WORKSPACE_ROOT = path.join(__dirname, '..');
   const abs = path.resolve(WORKSPACE_ROOT, relPath);
   if (!abs.startsWith(WORKSPACE_ROOT + path.sep) && abs !== WORKSPACE_ROOT) {
     return res.status(403).json({ error: 'Acceso denegado.' });
   }
 
-  const fs = require('fs');
   if (!fs.existsSync(abs)) return res.status(404).json({ error: 'Archivo no encontrado.' });
 
   const filename = path.basename(abs);
+  const ext = filename.split('.').pop().toLowerCase();
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Type', contentType);
   res.sendFile(abs);
 });
 
@@ -283,6 +248,12 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (prompt.length > MAX_PROMPT_LENGTH) {
+      socket.emit('agent-progress', { type: 'error', message: `El prompt excede el límite de ${MAX_PROMPT_LENGTH} caracteres.` });
+      socket.emit('agent-done', { success: false });
+      return;
+    }
+
     // 1. Crear un controlador para esta ejecución
     const controller = new AbortController();
     activeRuns.set(socket.id, controller);
@@ -311,11 +282,19 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`[Socket] Desconectado: ${socket.id}`);
-    // 3. Abortar la ejecución en el backend si el frontend se desconecta (Botón Detener)
     const controller = activeRuns.get(socket.id);
     if (controller) {
       controller.abort();
       activeRuns.delete(socket.id);
+    }
+  });
+
+  socket.on('cancel-agent', () => {
+    const controller = activeRuns.get(socket.id);
+    if (controller) {
+      controller.abort();
+      activeRuns.delete(socket.id);
+      console.log(`[Socket] Ejecución cancelada por el usuario: ${socket.id}`);
     }
   });
 });
