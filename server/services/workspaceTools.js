@@ -23,7 +23,6 @@ const glob = require('glob');
 const https = require('https');
 const http = require('http');
 const { getSkillContent } = require('./agentReader');
-const { generateExcel } = require('./excelGenerator');
 
 const WORKSPACE_ROOT = path.resolve(__dirname, '../../');
 const MAX_READ_BYTES = 2 * 1024 * 1024; // archivos > 2 MB no se envían completos al LLM
@@ -175,52 +174,6 @@ const WORKSPACE_TOOL_DEFS = [
         required: ['skillName']
       }
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'workspace__generateExcel',
-      description: 'Genera un archivo Excel (.xlsx) a partir de una lista de casos de prueba en formato JSON, compatible con Azure DevOps.',
-      parameters: {
-        type: 'object',
-        properties: {
-          outputPath: { type: 'string', description: 'Ruta relativa al workspace del archivo Excel a generar (ej. tests/Casos de prueba/273947/casos_prueba_HU_273947.xlsx)' },
-          jsonContent: {
-            type: 'object',
-            properties: {
-              casos_prueba: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    titulo: { type: 'string' },
-                    area_path: { type: 'string' },
-                    assigned_to: { type: 'string' },
-                    state: { type: 'string' },
-                    automation_status: { type: 'string' },
-                    pasos: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          numero: { type: 'number' },
-                          accion: { type: 'string' },
-                          resultado_esperado: { type: 'string' }
-                        },
-                        required: ['numero', 'accion', 'resultado_esperado']
-                      }
-                    }
-                  },
-                  required: ['titulo', 'pasos']
-                }
-              }
-            },
-            required: ['casos_prueba']
-          }
-        },
-        required: ['outputPath', 'jsonContent']
-      }
-    }
   }
 ];
 
@@ -241,7 +194,6 @@ function callWorkspaceTool(toolName, args) {
     case 'textSearch': return textSearch(args);
     case 'fetchUrl': return fetchUrl(args);
     case 'loadSkill': return loadSkill(args);
-    case 'generateExcel': return generateExcelTool(args);
     default:
       throw new Error(`Herramienta workspace desconocida: ${toolName}`);
   }
@@ -419,22 +371,6 @@ function loadSkill({ skillName }) {
   }
 
   return content;
-}
-
-/**
- * Genera un archivo Excel a partir de una lista de casos de prueba.
- */
-async function generateExcelTool({ outputPath, jsonContent }) {
-  if (!outputPath || typeof outputPath !== 'string') {
-    throw new Error('Se requiere el parámetro outputPath.');
-  }
-  if (!jsonContent || typeof jsonContent !== 'object') {
-    throw new Error('Se requiere el parámetro jsonContent.');
-  }
-
-  const absPath = safePath(outputPath);
-  await generateExcel(absPath, jsonContent);
-  return `Archivo Excel generado correctamente: ${outputPath}`;
 }
 
 module.exports = { WORKSPACE_TOOL_DEFS, callWorkspaceTool };

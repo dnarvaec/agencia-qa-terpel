@@ -466,11 +466,7 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
             type: 'info',
             message: '📌 El agente terminó sin guardar archivos — forzando paso de guardado…',
           });
-          const saveMessage = agentName === 'agente-excel'
-            ? 'Has completado el análisis pero TODAVÍA no has guardado el archivo Excel. ' +
-              'Ejecuta AHORA mismo los pasos de guardado llamando a la herramienta workspace__generateExcel. ' +
-              'NO respondas con texto. Solo ejecuta las tools de guardado.'
-            : 'Has completado el análisis pero TODAVÍA no has guardado los archivos. ' +
+          const saveMessage = 'Has completado el análisis pero TODAVÍA no has guardado los archivos. ' +
               'Ejecuta AHORA mismo los pasos de guardado: ' +
               'primero llama workspace__createDirectory para crear el directorio, ' +
               'luego llama workspace__writeFile para guardar CADA archivo del workflow. ' +
@@ -537,9 +533,6 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
             if (toolShortName === 'writeFile') {
               hasWrittenFiles = true; // marcar guardado
               if (args.path) writtenFilesSet.add(args.path);
-            } else if (toolShortName === 'generateExcel') {
-              hasWrittenFiles = true; // marcar guardado
-              if (args.outputPath) writtenFilesSet.add(args.outputPath);
             }
             // fetchUrl devuelve una Promise; await funciona para síncronos y asíncronos
             const result = await Promise.resolve(callWorkspaceTool(toolShortName, args));

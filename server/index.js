@@ -11,7 +11,6 @@ const fs = require('fs');
 const { getAgents } = require('./services/agentReader');
 const { runAgent } = require('./services/agentRunner');
 const { getDashboardData, parseMarkdownHU } = require('./services/dashboardService');
-const { generateExcel } = require('./services/excelGenerator');
 const MCPClient   = require('./services/mcpClient');
 const fabricClient = require('./services/fabricClient');
 const powerbiClient = require('./services/powerbiClient');
@@ -111,16 +110,8 @@ app.post('/api/save-draft', async (req, res) => {
 
     const generatedFiles = [relPath];
 
-    // 2. Si el agente es 'agente-excel', recompilar el Excel
+    // 2. Si el agente es 'mejorar-hu', actualizar la descripción en el Markdown (.md)
     const normalizedId = (agentId || '').toLowerCase().replace(/[\s]+/g, '-');
-    if (normalizedId === 'agente-excel') {
-      const excelRelPath = relPath.replace(/\.json$/, '.xlsx');
-      const absExcel = path.resolve(WORKSPACE_ROOT, excelRelPath);
-      await generateExcel(absExcel, content);
-      generatedFiles.push(excelRelPath);
-    }
-
-    // 3. Si el agente es 'mejorar-hu', actualizar la descripción en el Markdown (.md)
     if (normalizedId === 'mejorar-hu' || relPath.endsWith('-final.json')) {
       const mdRelPath = relPath.replace(/\.json$/, '.md');
       const absMd = path.resolve(WORKSPACE_ROOT, mdRelPath);
