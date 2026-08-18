@@ -389,11 +389,19 @@ function fetchUrl({ url, method = 'GET' }) {
   return new Promise((resolve, reject) => {
     const req = lib.request(url, { method, timeout: 15_000 }, (res) => {
       let body = '';
+      let oversize = false;
+      const MAX_ACCUMULATE = 512 * 1024; // detener acumulación en 512 KB
       res.setEncoding('utf8');
-      res.on('data', (chunk) => { body += chunk; });
+      res.on('data', (chunk) => {
+        if (!oversize) {
+          body += chunk;
+          if (body.length >= MAX_ACCUMULATE) oversize = true;
+        }
+      });
       res.on('end', () => {
-        const truncated = body.length > 8000 ? body.substring(0, 8000) + '\n...[truncado]' : body;
-        resolve(`HTTP ${res.statusCode}\n${truncated}`);
+        const base = oversize ? body.substring(0, 8000) + '\n...[respuesta demasiado grande, truncada]'
+          : body.length > 8000 ? body.substring(0, 8000) + '\n...[truncado]' : body;
+        resolve(`HTTP ${res.statusCode}\n${base}`);
       });
     });
     req.on('error', reject);

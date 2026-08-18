@@ -171,6 +171,22 @@ app.get('/api/download', (req, res) => {
   res.sendFile(abs);
 });
 
+app.get('/api/read-text', (req, res) => {
+  const { path: relPath } = req.query;
+  if (!relPath) return res.status(400).json({ error: 'Falta el parámetro path.' });
+  const abs = path.resolve(WORKSPACE_ROOT, relPath);
+  if (!abs.startsWith(WORKSPACE_ROOT + path.sep) && abs !== WORKSPACE_ROOT) {
+    return res.status(403).json({ error: 'Acceso denegado.' });
+  }
+  if (!fs.existsSync(abs)) return res.status(404).json({ error: 'No encontrado.' });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(fs.readFileSync(abs, 'utf8'));
+});
+
+// Playwright HTML reports servidos para visualización in-browser
+app.use('/reports/api', express.static(path.join(WORKSPACE_ROOT, 'automatizacion api', 'reports')));
+app.use('/reports/web', express.static(path.join(WORKSPACE_ROOT, 'automatizacion web', 'reports')));
+
 // ── Fabric API ────────────────────────────────────────────────────────────────
 app.get('/api/fabric/explore', async (_req, res) => {
   try { res.json(await fabricClient.explore(process.env.FABRIC_WORKSPACE_ID)); }

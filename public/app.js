@@ -28,6 +28,7 @@ const resultDesc      = document.getElementById('resultDesc');
 // -- State --------------------------------------------------------------------
 let agents    = [];
 let isRunning = false;
+let cancelledByUser = false; // evita que agent-done sobreescriba el mensaje de cancelación
 
 // -- Socket.IO ----------------------------------------------------------------
 const socket = io({ transports: ['websocket', 'polling'] });
@@ -37,7 +38,10 @@ socket.on('disconnect',    () => { setStatus('disconnected', '○ Desconectado')
 socket.on('connect_error', () => { setStatus('disconnected', '✗ Error de conexión'); });
 
 socket.on('agent-progress', handleProgress);
-socket.on('agent-done', ({ success, error, files }) => finishRun(success, error, files));
+socket.on('agent-done', ({ success, error, files }) => {
+  if (cancelledByUser) { cancelledByUser = false; return; }
+  finishRun(success, error, files);
+});
 
 // -- Traducción de eventos a mensajes amigables -------------------------------
 const SPINNER_LABELS = {
@@ -59,6 +63,7 @@ const TOKEN_RE = /Tokens totales:.*TOTAL=(\d+)/i;
 
 function friendlyToolMessage(rawMessage) {
   const m = rawMessage.toLowerCase();
+  if (m.includes('executecommand') || m.includes('npm run') || m.includes('npx playwright')) return 'Ejecutando tests de automatización…';
   if (m.includes('wit_get_work_item') || m.includes('work_item'))      return 'Consultando Historia de Usuario en Azure DevOps…';
   if (m.includes('wit_update') || m.includes('update_work'))           return 'Actualizando elemento en Azure DevOps…';
   if (m.includes('azure') || m.includes('devops') || m.includes('ado')) return 'Comunicándose con Azure DevOps…';
@@ -193,6 +198,7 @@ function renderAgentCard(agent) {
 runBtn.addEventListener('click', startRun);
 
 stopBtn.addEventListener('click', () => {
+  cancelledByUser = true;
   socket.emit('cancel-agent');
   finishRun(false, 'Ejecución cancelada por el usuario.');
 });
@@ -227,6 +233,7 @@ let currentDraftPath = null;
 let currentDraftData = null;
 let currentAgentId   = null;
 let currentFinalFiles = [];
+let currentReviewMode = 'edit'; // 'edit' | 'automation'
 
 function finishRun(success, errorMsg, files) {
   isRunning = false;
@@ -245,7 +252,14 @@ function finishRun(success, errorMsg, files) {
     return;
   }
 
-  // Si tiene éxito, verificar si podemos cargar un borrador interactivo
+  // Si tiene éxito, verificar primero si hay archivos .spec.ts (agente de automatización)
+  const specFiles = findSpecFiles(files || []);
+  if (specFiles.length > 0) {
+    openAutomationReview(specFiles, files || []);
+    return;
+  }
+
+  // Verificar si podemos cargar un borrador interactivo (HU / Casos de Prueba)
   const jsonPath = findJsonFile(files || []);
   if (jsonPath) {
     openInteractiveEditor(jsonPath, files, agentSelect.value);
@@ -866,6 +880,7 @@ function serializeEditorData() {
 
 // Confirmar sin cambios
 editorCancelBtn.addEventListener('click', () => {
+  resetEditorHeader();
   showState('result');
   resultIcon.className  = 'result-icon result-icon--ok';
   resultIcon.textContent = '✓';
@@ -876,6 +891,19 @@ editorCancelBtn.addEventListener('click', () => {
 
 // Guardar y Confirmar
 editorSaveBtn.addEventListener('click', async () => {
+  if (currentReviewMode === 'automation') {
+    resetEditorHeader();
+    showState('result');
+    resultIcon.className  = 'result-icon result-icon--ok';
+    resultIcon.textContent = '✓';
+    resultTitle.textContent = 'Automatización aprobada';
+    resultDesc.textContent  = 'Los tests han sido aprobados. Descarga los archivos para integrarlos al proyecto.';
+    // Excluir archivos internos de Playwright (results.json, carpeta reports/)
+    const downloadable = currentFinalFiles.filter(f => !/results\.json$/.test(f) && !/[\\/]reports[\\/]/.test(f));
+    renderDownloads(downloadable);
+    return;
+  }
+
   editorSaveBtn.disabled = true;
   editorSaveBtn.textContent = 'Guardando…';
 
@@ -940,4 +968,134 @@ function showToast(message, type = 'error') {
       setTimeout(() => toast.remove(), 300);
     }
   }, 4000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTOMATION REVIEW — HITL para el agente "Automatizar y Ejecutar"
+// ─────────────────────────────────────────────────────────────────────────────
+
+function findSpecFiles(files) {
+  return (files || []).filter(f => /\.spec\.(ts|js)$/.test(f));
+}
+
+function detectReportUrl(specFiles) {
+  const paths = (specFiles || []).map(f => f.replace(/\\/g, '/'));
+  if (paths.some(p => p.includes('automatizacion api'))) return '/reports/api/index.html';
+  if (paths.some(p => p.includes('automatizacion web'))) return '/reports/web/index.html';
+  return '/reports/api/index.html'; // fallback
+}
+
+async function openAutomationReview(specFiles, allFiles) {
+  currentFinalFiles = allFiles;
+  currentReviewMode = 'automation';
+
+  let testResults = null;
+  const resultsPath = allFiles.find(f => f.endsWith('results.json'));
+  if (resultsPath) {
+    try {
+      const r = await fetch(`/api/read-draft?path=${encodeURIComponent(resultsPath)}`);
+      if (r.ok) testResults = await r.json();
+    } catch (_) {}
+  }
+
+  const specContents = [];
+  for (const p of specFiles.slice(0, 3)) {
+    try {
+      const r = await fetch(`/api/read-text?path=${encodeURIComponent(p)}`);
+      if (r.ok) specContents.push({ path: p, code: await r.text() });
+    } catch (_) {}
+  }
+
+  renderAutomationReview(testResults, specContents, specFiles);
+  showState('editor');
+}
+
+function renderAutomationReview(testResults, specContents, specFiles) {
+  const titleEl    = document.querySelector('.editor-title');
+  const subtitleEl = document.querySelector('.editor-subtitle');
+  if (titleEl)    titleEl.textContent    = 'Revisar Automatización Generada';
+  if (subtitleEl) subtitleEl.textContent = 'Verifica el código generado y los resultados antes de aprobar.';
+  editorSaveBtn.textContent   = 'Aprobar y Descargar';
+  editorCancelBtn.textContent = 'Ver sin aprobar';
+
+  const reportUrl = detectReportUrl(specFiles);
+  const reportBtn = `<a class="btn btn--report" href="${reportUrl}" target="_blank" rel="noopener">
+    <svg viewBox="0 0 16 16" fill="currentColor" width="13" height="13">
+      <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h12zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/>
+      <path d="M10.97 4.97a.75.75 0 0 1 1.071 1.05l-3.992 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.235.235 0 0 1 .02-.022z"/>
+    </svg>
+    Ver Reporte Completo ↗
+  </a>`;
+
+  let resultsHtml = '';
+
+  if (testResults && testResults.stats) {
+    const s = testResults.stats;
+    const passed  = s.expected   || 0;
+    const failed  = s.unexpected || 0;
+    const skipped = s.skipped    || 0;
+    const okClass = failed > 0 ? 'auto-status--fail' : 'auto-status--pass';
+    const okText  = failed > 0 ? `${failed} test(s) fallido(s)` : 'Todos los tests pasaron ✅';
+
+    let failedList = '';
+    if (failed > 0 && testResults.suites) {
+      const titles = [];
+      (function collect(suites) {
+        (suites || []).forEach(s => {
+          (s.specs || []).forEach(sp => { if (!sp.ok) titles.push(sp.title); });
+          if (s.suites) collect(s.suites);
+        });
+      })(testResults.suites);
+      if (titles.length) {
+        failedList = `<div class="auto-failures">
+          <p class="auto-failures-title">❌ Tests fallidos:</p>
+          <ul>${titles.map(t => `<li>${escHtml(t)}</li>`).join('')}</ul>
+        </div>`;
+      }
+    }
+
+    resultsHtml = `
+      <div class="auto-review-header">
+        <span class="auto-status-badge ${okClass}">${okText}</span>
+        ${reportBtn}
+      </div>
+      <div class="auto-review-results">
+        <div class="auto-stat auto-stat--pass"><span class="auto-stat-val">${passed}</span><span class="auto-stat-label">Pasados</span></div>
+        <div class="auto-stat auto-stat--fail"><span class="auto-stat-val">${failed}</span><span class="auto-stat-label">Fallidos</span></div>
+        <div class="auto-stat auto-stat--skip"><span class="auto-stat-val">${skipped}</span><span class="auto-stat-label">Saltados</span></div>
+      </div>
+      ${failedList}
+    `;
+  } else {
+    resultsHtml = `<div class="auto-review-header">
+      <span class="auto-status-badge auto-status--info">Tests ejecutados</span>
+      ${reportBtn}
+    </div>`;
+  }
+
+  const specsHtml = specContents.length
+    ? specContents.map(({ path: p, code }) => {
+        const name    = p.split(/[\\/]/).pop();
+        const preview = code.length > 3000 ? code.substring(0, 3000) + '\n\n// … (archivo completo disponible en descarga)' : code;
+        return `<div class="auto-file-section">
+          <div class="auto-file-header">
+            <span class="auto-file-name">📄 ${escHtml(name)}</span>
+            <a class="btn btn--secondary auto-file-download" href="/api/download?path=${encodeURIComponent(p)}" download="${escHtml(name)}">↓ Descargar</a>
+          </div>
+          <pre class="auto-code-preview">${escHtml(preview)}</pre>
+        </div>`;
+      }).join('')
+    : `<p style="color:var(--text-2);text-align:center;padding:24px;">Los archivos fueron guardados en el workspace.</p>`;
+
+  editorContent.innerHTML = `<div class="auto-review">${resultsHtml}${specsHtml}</div>`;
+}
+
+function resetEditorHeader() {
+  currentReviewMode = 'edit';
+  const titleEl    = document.querySelector('.editor-title');
+  const subtitleEl = document.querySelector('.editor-subtitle');
+  if (titleEl)    titleEl.textContent    = 'Revisar y Editar Resultados';
+  if (subtitleEl) subtitleEl.textContent = 'Revisa o modifica los datos generados antes de confirmar la creación del archivo final.';
+  editorSaveBtn.textContent   = 'Confirmar y Guardar';
+  editorCancelBtn.textContent = 'Confirmar sin cambios';
 }

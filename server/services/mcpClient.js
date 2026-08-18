@@ -160,7 +160,13 @@ class MCPClient {
       }, REQUEST_TIMEOUT_MS);
 
       this.pending.set(id, { resolve, reject, timer });
-      this.process.stdin.write(payload);
+      try {
+        this.process.stdin.write(payload);
+      } catch (writeErr) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(writeErr);
+      }
     });
   }
 

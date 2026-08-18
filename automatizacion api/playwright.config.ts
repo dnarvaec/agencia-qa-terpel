@@ -25,5 +25,7 @@ export default defineConfig({
       'Content-Type': 'application/json',
     },
     ignoreHTTPSErrors: true,
+    // Captura trazas con request/response completo para auditoría
+    trace: 'on',
   },
 });
