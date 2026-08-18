@@ -12,11 +12,16 @@
  */
 
 const { AzureOpenAI } = require('openai');
+const fs   = require('fs');
+const path = require('path');
 
 const { getAgent, getSkills } = require('./agentReader');
 const MCPManager = require('./mcpManager');
 const { WORKSPACE_TOOL_DEFS,
   callWorkspaceTool } = require('./workspaceTools');
+
+const WORKSPACE_ROOT = path.resolve(__dirname, '../../');
+const PROJECT_CONTEXT_FILE = path.join(WORKSPACE_ROOT, '.github/context/contexto.md');
 
 const MAX_ITERATIONS = 70;
 
@@ -53,7 +58,9 @@ const TOOL_NAME_MAP = [
   [/\bsearch\/textSearch\b/g,               'workspace__textSearch'],
   [/\bsearch\/codebase\b/g,                 'workspace__textSearch'],
   [/\bweb\/fetch\b/g,                       'workspace__fetchUrl'],
-  [/\bread\/viewImage\b/g,                  '(no disponible en este runtime)'],
+  [/\bexecute\/runInTerminal\b/g,            'workspace__executeCommand'],
+  [/\bexecute\/\w+\b/g,                      'workspace__executeCommand'],
+  [/\bread\/viewImage\b/g,                   '(no disponible en este runtime)'],
   [/\bread\/problems\b/g,                   '(no disponible en este runtime)'],
   [/\bread\/readNotebookCellOutput\b/g,      '(no disponible en este runtime)'],
   [/\bread\/getNotebookSummary\b/g,          '(no disponible en este runtime)'],
@@ -316,6 +323,14 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
     resolvedPrompt = resolvedPrompt.replace(pattern, replacement);
   }
 
+  // ── Inyectar contexto del proyecto ────────────────────────────────────────
+  // En VS Code Copilot el runtime lee contexto.md como skill automáticamente.
+  // Aquí se inyecta explícitamente para garantizar paridad de comportamiento.
+  if (fs.existsSync(PROJECT_CONTEXT_FILE)) {
+    const contextContent = fs.readFileSync(PROJECT_CONTEXT_FILE, 'utf8');
+    resolvedPrompt = `[CONTEXTO DEL PROYECTO]\n${contextContent}\n\n` + resolvedPrompt;
+  }
+
   // ── NUEVO: Inyectar información de skills disponibles ────────────────────────
   const skills = getSkills();
   if (skills.length > 0) {
@@ -361,6 +376,7 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   // termina con 'stop' sin haber llamado workspace__writeFile.
   let hasCalledAnyTool = false; // ¿el modelo llamó alguna tool en esta ejecución?
   let hasWrittenFiles = false; // ¿llamó workspace__writeFile al menos una vez?
+  let hasExecutedCommand = false; // ¿llamó workspace__executeCommand? → modo ejecución, save-step no aplica
   let injectedSaveStep = false; // ¿ya inyectamos el mensaje de guardado?
   let saveStepIter = 0;     // iteraciones transcurridas desde la inyección del save-step
   const writtenFilesSet = new Set(); // rutas únicas de archivos guardados durante la ejecución
@@ -460,7 +476,7 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
       if (choice.finish_reason === 'stop' || !msg.tool_calls || msg.tool_calls.length === 0) {
         // Si el agente ya hizo trabajo pero NO guardó archivos, forzar el paso de guardado.
         // Solo lo hacemos una vez (injectedSaveStep evita bucle infinito).
-        if (hasCalledAnyTool && !hasWrittenFiles && !injectedSaveStep) {
+        if (hasCalledAnyTool && !hasWrittenFiles && !injectedSaveStep && !hasExecutedCommand) {
           injectedSaveStep = true;
           onProgress({
             type: 'info',
@@ -533,6 +549,8 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
             if (toolShortName === 'writeFile') {
               hasWrittenFiles = true; // marcar guardado
               if (args.path) writtenFilesSet.add(args.path);
+            } else if (toolShortName === 'executeCommand') {
+              hasExecutedCommand = true; // modo ejecución — save-step no debe activarse
             }
             // fetchUrl devuelve una Promise; await funciona para síncronos y asíncronos
             const result = await Promise.resolve(callWorkspaceTool(toolShortName, args));

@@ -13,16 +13,26 @@
  *   search/codebase      → workspace__textSearch
  *   search/textSearch    → workspace__textSearch
  *   web/fetch            → workspace__fetchUrl
+ *   execute/*           → workspace__executeCommand
  *
  * Todas las rutas se validan contra WORKSPACE_ROOT para prevenir path traversal.
  */
 
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const glob = require('glob');
 const https = require('https');
 const http = require('http');
 const { getSkillContent } = require('./agentReader');
+
+// Comandos permitidos en workspace__executeCommand (allowlist de seguridad)
+const ALLOWED_COMMANDS = [
+  /^npm\s+run\s+(test|lint|build)/i,
+  /^npx\s+playwright\s+(test|show-report|install|codegen)/i,
+  /^npx\s+tsc(\s|$)/i,
+  /^npm\s+install(\s|$)/i,
+];
 
 const WORKSPACE_ROOT = path.resolve(__dirname, '../../');
 const MAX_READ_BYTES = 2 * 1024 * 1024; // archivos > 2 MB no se envían completos al LLM
@@ -164,6 +174,40 @@ const WORKSPACE_TOOL_DEFS = [
   {
     type: 'function',
     function: {
+      name: 'workspace__executeCommand',
+      description: 'Ejecuta un comando de terminal en el workspace y devuelve stdout + stderr + código de salida. ' +
+        'OBLIGATORIO para: compilar TypeScript (npx tsc --noEmit), ejecutar tests Playwright (npm run test:api / npm run test:web), ' +
+        'y verificar resultados reales. El agente DEBE usar esta herramienta para validar todo código generado antes de entregarlo. ' +
+        'Un exit code 0 = éxito, distinto de 0 = hay errores a corregir.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: {
+            type: 'string',
+            description: 'Comando a ejecutar. Permitidos: "npm run test:api", "npm run test:web", ' +
+              '"npm run test:api -- --grep <patrón>", ' +
+              '"npx playwright test <archivo.spec.ts> --config <playwright.config.ts>", ' +
+              '"npx tsc --noEmit --project <tsconfig.json>", "npm install". ' +
+              'NO se permiten comandos destructivos (rm, del, git push, etc.).',
+          },
+          cwd: {
+            type: 'string',
+            description: 'Directorio de trabajo relativo al workspace. ' +
+              'Usa "." para la raíz (donde está package.json). ' +
+              'Ejemplos: "automatizacion api", "automatizacion web".',
+          },
+          timeout: {
+            type: 'number',
+            description: 'Timeout en milisegundos. Por defecto 120000 (2 min). Aumentar a 180000 para suites grandes.',
+          },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'workspace__loadSkill',
       description: 'Carga el contenido completo de una skill desde .github/skills/{skillName}/SKILL.md. Usa esto cuando necesites entender cómo ejecutar o usar una skill específica.',
       parameters: {
@@ -193,6 +237,7 @@ function callWorkspaceTool(toolName, args) {
     case 'fileSearch': return fileSearch(args);
     case 'textSearch': return textSearch(args);
     case 'fetchUrl': return fetchUrl(args);
+    case 'executeCommand': return executeCommand(args);
     case 'loadSkill': return loadSkill(args);
     default:
       throw new Error(`Herramienta workspace desconocida: ${toolName}`);
@@ -371,6 +416,37 @@ function loadSkill({ skillName }) {
   }
 
   return content;
+}
+
+async function executeCommand({ command, cwd: relativeCwd = '.', timeout = 120_000 }) {
+  const trimmed = command.trim();
+  if (!ALLOWED_COMMANDS.some((re) => re.test(trimmed))) {
+    throw new Error(
+      `Comando no permitido: "${trimmed}". ` +
+      'Permitidos: npm run test:*, npm run lint*, npx playwright test [...], npx tsc [...], npm install.'
+    );
+  }
+
+  const absCwd = relativeCwd === '.' ? WORKSPACE_ROOT : safePath(relativeCwd);
+
+  return new Promise((resolve) => {
+    exec(trimmed, {
+      cwd:         absCwd,
+      timeout,
+      maxBuffer:   10 * 1024 * 1024, // 10 MB — suficiente para suites grandes
+      env:         { ...process.env },
+      shell:       true, // necesario en Windows para npx/npm en PATH
+      windowsHide: true,
+    }, (error, stdout, stderr) => {
+      const parts = [];
+      if (stdout && stdout.trim()) parts.push(`[STDOUT]\n${stdout.trim()}`);
+      if (stderr && stderr.trim()) parts.push(`[STDERR]\n${stderr.trim()}`);
+      const exitCode = error?.code ?? 0;
+      const body = parts.join('\n\n') || '(sin salida)';
+      // Siempre resolve — tests fallidos tienen exit code != 0 pero producen output útil
+      resolve(`[Exit Code: ${exitCode}]\n${body}`);
+    });
+  });
 }
 
 module.exports = { WORKSPACE_TOOL_DEFS, callWorkspaceTool };

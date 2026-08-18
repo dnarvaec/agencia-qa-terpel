@@ -201,7 +201,88 @@ test.describe('POST /api/sap/logisticsCenter', () => {
 
 ---
 
-## Comportamientos Conocidos de la Aplicación
+## Comandos de Ejecución (para el agente "Automatizar y Ejecutar")
+
+> El agente usa `workspace__executeCommand` para compilar y ejecutar tests. Los comandos se corren siempre desde la raíz del workspace (cwd = ".") salvo que se indique lo contrario.
+
+### Suite API (alcance de esta POC)
+
+| Propósito | Comando |
+|---|---|
+| **Verificar TypeScript** (antes de ejecutar) | `npx tsc --noEmit --project "automatizacion api/tsconfig.json"` |
+| **Ejecutar toda la suite API** | `npm run test:api` |
+| **Ejecutar un spec específico** | `npx playwright test "automatizacion api/tests/logistics-center/logisticsCenter.spec.ts" --config "automatizacion api/playwright.config.ts"` |
+| **Ejecutar por patrón de nombre** | `npm run test:api -- --grep "Crear Centro Logístico"` |
+| **Leer resultados JSON** (post-ejecución) | `workspace__readFile` → `automatizacion api/reports/results.json` |
+
+### Flujo obligatorio del agente para API
+
+```
+1. workspace__readFile(".github/context/contexto.md")          ← bootstrap
+2. workspace__readFile("archivos/Casos de Prueba/{ID}/{ID}-test-cases.json")  ← casos
+3. workspace__listDirectory("automatizacion api/src/apis/")    ← API objects disponibles
+4. workspace__readFile("automatizacion api/src/schemas/logisticsCenter.ts")   ← tipos
+5. workspace__writeFile("automatizacion api/tests/{recurso}/{recurso}.spec.ts", ...)  ← generar test
+6. workspace__executeCommand("npx tsc --noEmit --project \"automatizacion api/tsconfig.json\"")  ← compilar
+7. workspace__executeCommand("npm run test:api")                ← ejecutar
+8. workspace__readFile("automatizacion api/reports/results.json")  ← leer resultados
+9. Si hay fallos → corregir spec → volver a paso 6 (máx. 5 iteraciones)
+```
+
+### Interpretación de resultados JSON
+
+El archivo `automatizacion api/reports/results.json` tiene esta estructura:
+```json
+{
+  "stats": { "expected": N, "unexpected": M, "flaky": 0 },
+  "suites": [{ "specs": [{ "title": "...", "ok": true/false, "tests": [...] }] }]
+}
+```
+- `stats.unexpected > 0` → hay fallos que corregir
+- `stats.expected === total` → todos los tests pasaron → entrega completada
+- Para ver el detalle de un fallo: `suites[*].specs[*].tests[*].errors[*].message`
+
+### Suite Web (fuera de alcance en la POC actual — documentado para uso futuro)
+
+| Propósito | Comando |
+|---|---|
+| **Verificar TypeScript** | `npx tsc --noEmit --project "automatizacion web/tsconfig.json"` |
+| **Ejecutar toda la suite Web** | `npm run test:web` |
+| **Ejecutar con navegador visible** | `npm run test:web:headed` |
+| **Ejecutar un spec específico** | `npx playwright test "automatizacion web/tests/{feature}/{spec}.spec.ts" --config "automatizacion web/playwright.config.ts"` |
+| **Leer resultados JSON** (post-ejecución) | `workspace__readFile` → `automatizacion web/reports/results.json` |
+
+### Flujo obligatorio del agente para Web
+
+```
+1. workspace__readFile(".github/context/contexto.md")                        ← bootstrap
+2. workspace__readFile("archivos/Casos de Prueba/{ID}/{ID}-test-cases.json") ← casos
+3. playwright__browser_navigate(APP_URL)                                     ← exploración en vivo
+4. playwright__browser_snapshot()                                            ← capturar árbol de accesibilidad
+5. [ciclo exploración: navigate → snapshot → interact → snapshot]
+6. workspace__writeFile("automatizacion web/src/pages/{Page}.ts", ...)       ← Page Object
+7. workspace__writeFile("automatizacion web/src/fixtures/page.fixture.ts", ...)  ← completar fixture con login real
+8. workspace__writeFile("automatizacion web/tests/{feature}/{spec}.spec.ts", ...)
+9. workspace__executeCommand("npx tsc --noEmit --project \"automatizacion web/tsconfig.json\"")
+10. workspace__executeCommand("npm run test:web")
+11. workspace__readFile("automatizacion web/reports/results.json")
+12. Si hay fallos → corregir → volver al paso 9 (máx. 5 iteraciones)
+```
+
+### Estructura de fixtures Web
+
+```typescript
+// Siempre importar desde @fixtures/page.fixture, NUNCA de @playwright/test directamente
+import { test, expect } from '@fixtures/page.fixture';
+
+test('caso de prueba', async ({ authenticatedPage }) => {
+  // authenticatedPage ya está en APP_URL autenticado
+});
+```
+
+**Credenciales web**: `env.defaultUser` / `env.defaultPassword` (desde `.env`)
+
+---
 
 - El campo `format` en Centros Logísticos no puede estar vacío → HTTP 400 `INVALID_BODY_CONTENT`
 - El campo `public_key` en SSO no puede estar vacío → HTTP 400 `INVALID_BODY_CONTENT`

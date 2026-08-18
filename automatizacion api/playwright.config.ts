@@ -15,6 +15,7 @@ export default defineConfig({
   workers: process.env.CI ? 4 : 2,
   reporter: [
     ['html', { outputFolder: './reports', open: 'never' }],
+    ['json', { outputFile: './reports/results.json' }],
     ['list'],
   ],
   use: {

@@ -15,6 +15,7 @@ export default defineConfig({
   workers: 1,
   reporter: [
     ['html', { outputFolder: './reports', open: 'never' }],
+    ['json', { outputFile: './reports/results.json' }],
     ['list'],
   ],
   use: {
