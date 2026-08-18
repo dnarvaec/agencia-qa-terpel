@@ -1,0 +1,26 @@
+{
+  "valid": {
+    "vendor":              "100001",
+    "vendorNit":           "900123456-1",
+    "vendorName":          "Proveedor SA",
+    "vendorComercialName": "Proveedor Comercial Terpel",
+    "status":              "A",
+    "modificationDate":    "2025-01-15",
+    "modificationHour":    "10:30:00"
+  },
+  "update": {
+    "vendor":              "100001",
+    "vendorComercialName": "Proveedor Comercial Actualizado",
+    "status":              "I",
+    "modificationDate":    "2025-02-01",
+    "modificationHour":    "09:00:00"
+  },
+  "missingVendor": {
+    "vendorNit":           "900123456-1",
+    "vendorName":          "Proveedor SA",
+    "vendorComercialName": "Proveedor Comercial",
+    "status":              "A",
+    "modificationDate":    "2025-01-15",
+    "modificationHour":    "10:30:00"
+  }
+}

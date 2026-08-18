@@ -1,0 +1,40 @@
+{
+  "valid": {
+    "logisticCenter":     "1OV3",
+    "logisticName":       "Centro Logístico Terpel Norte",
+    "logisticCenterType": "ESTACION",
+    "regional":           "NORTE",
+    "companyCode":        "1000",
+    "customer":           "C001",
+    "cashBook":           "CB01",
+    "costCenter":         "CC001",
+    "profitCenter":       "PC001",
+    "city":               "BARRANQUILLA",
+    "edscod":             "EDS001",
+    "format":             "ESTACION",
+    "status":             "ACTIVO",
+    "modificationDate":   "2025-01-15",
+    "modificationHour":   "10:30:00"
+  },
+  "emptyFormat": {
+    "logisticCenter":     "1OV3",
+    "logisticName":       "Centro Logístico Terpel Norte",
+    "logisticCenterType": "ESTACION",
+    "regional":           "NORTE",
+    "companyCode":        "1000",
+    "customer":           "C001",
+    "cashBook":           "CB01",
+    "costCenter":         "CC001",
+    "profitCenter":       "PC001",
+    "city":               "BARRANQUILLA",
+    "edscod":             "EDS001",
+    "format":             "",
+    "status":             "ACTIVO",
+    "modificationDate":   "2025-01-15",
+    "modificationHour":   "10:30:00"
+  },
+  "missingFields": {
+    "logisticCenter": "1OV3",
+    "logisticName":   "Centro Logístico Incompleto"
+  }
+}

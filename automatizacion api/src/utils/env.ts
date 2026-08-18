@@ -14,7 +14,9 @@ function optionalEnv(key: string, fallback = ''): string {
 }
 
 export const env = {
-  apiUrl:   requireEnv('API_URL'),
-  apiToken: optionalEnv('API_TOKEN'),
-  nodeEnv:  optionalEnv('NODE_ENV', 'development'),
+  apiUrl:    requireEnv('API_URL'),
+  ssoUrl:    requireEnv('SSO_URL'),
+  publicKey: optionalEnv('API_PUBLIC_KEY'),  // para fixture con SSO auto-login
+  apiToken:  optionalEnv('API_TOKEN'),       // token estático alternativo
+  nodeEnv:   optionalEnv('NODE_ENV', 'development'),
 } as const;

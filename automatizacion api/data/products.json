@@ -1,0 +1,40 @@
+{
+  "valid": {
+    "product":            "MAT-001",
+    "productDescription": "Gasolina Corriente 87 Octanos",
+    "baseUnit":           "LT",
+    "salesUnit":          "LT",
+    "conversionFactor":   "1",
+    "productType":        "COMBUSTIBLE",
+    "volume":             "1000",
+    "productLine":        "COMBUSTIBLES",
+    "productGroup":       "GASOLINAS",
+    "codigoIvaVentas":    "IVA19",
+    "codigoIvaCompras":   "IVA19",
+    "status":             "A",
+    "modificationDate":   "2025-01-15",
+    "modificationHour":   "10:30:00"
+  },
+  "update": {
+    "product":            "MAT-001",
+    "productDescription": "Gasolina Corriente 87 Octanos - Actualizado",
+    "status":             "A",
+    "modificationDate":   "2025-02-01",
+    "modificationHour":   "11:00:00"
+  },
+  "missingProduct": {
+    "productDescription": "Producto sin código SAP",
+    "baseUnit":           "LT",
+    "salesUnit":          "LT",
+    "conversionFactor":   "1",
+    "productType":        "COMBUSTIBLE",
+    "volume":             "500",
+    "productLine":        "COMBUSTIBLES",
+    "productGroup":       "GASOLINAS",
+    "codigoIvaVentas":    "IVA19",
+    "codigoIvaCompras":   "IVA19",
+    "status":             "A",
+    "modificationDate":   "2025-01-15",
+    "modificationHour":   "10:30:00"
+  }
+}

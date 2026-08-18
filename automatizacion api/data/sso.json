@@ -1,0 +1,11 @@
+{
+  "valid": {
+    "public_key": "REEMPLAZAR_CON_PUBLIC_KEY_REAL"
+  },
+  "emptyKey": {
+    "public_key": ""
+  },
+  "invalidKey": {
+    "public_key": "CLAVE_INVALIDA_QUE_NO_EXISTE"
+  }
+}
