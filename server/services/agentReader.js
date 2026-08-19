@@ -28,7 +28,7 @@ function parseFrontmatter(raw) {
   const tools = toolsBlock
     ? toolsBlock[1]
         .split(',')
-        .map((t) => t.replace(/[\r\n]/g, '').trim())
+        .map((t) => t.replace(/[\r\n]/g, '').trim().replace(/^["']|["']$/g, ''))
         .filter(Boolean)
     : [];
 

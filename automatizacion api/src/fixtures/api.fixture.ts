@@ -40,6 +40,9 @@ export const test = base.extend<ApiFixtures>({
   },
 
   ssoAuthenticatedContext: async ({}, use) => {
+    if (!env.publicKey) {
+      throw new Error('API_PUBLIC_KEY no está definida en .env. Es requerida para ssoAuthenticatedContext.');
+    }
     // Genera el token via SSO antes de cada test que use este fixture
     const ssoCtx = await request.newContext({
       baseURL: env.ssoUrl,
@@ -49,8 +52,11 @@ export const test = base.extend<ApiFixtures>({
     const tokenRes = await ssoCtx.post('/api/v1/authentication/generate-token', {
       data: { public_key: env.publicKey },
     });
-    const { token } = await tokenRes.json() as GenerateTokenResponse;
+    const ssoBody = await tokenRes.json() as GenerateTokenResponse;
     await ssoCtx.dispose();
+    if (!ssoBody.token) {
+      throw new Error(`SSO falló (HTTP ${tokenRes.status()}): ${JSON.stringify(ssoBody)}`);
+    }
 
     const context = await request.newContext({
       baseURL: env.apiUrl,
@@ -58,7 +64,7 @@ export const test = base.extend<ApiFixtures>({
       extraHTTPHeaders: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${ssoBody.token}`,
       },
     });
     await use(context);

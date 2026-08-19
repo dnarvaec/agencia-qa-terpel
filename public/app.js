@@ -534,11 +534,12 @@ async function openInteractiveEditor(jsonPath, originalFiles, agentId) {
     if (!res.ok) throw new Error('No se pudo cargar el borrador.');
     currentDraftData = await res.json();
 
-    // Renderizar según el agente o la estructura del JSON
-    if (currentDraftData.story_id || currentDraftData.story_title) {
-      renderHUEditor(currentDraftData);
-    } else if (Array.isArray(currentDraftData.casos_prueba) || Array.isArray(currentDraftData.cases)) {
+    // Casos de prueba (test_cases/casos_prueba) tienen prioridad sobre story_id
+    // porque el JSON del agente incluye story_id para trazabilidad
+    if (Array.isArray(currentDraftData.test_cases) || Array.isArray(currentDraftData.casos_prueba) || Array.isArray(currentDraftData.cases)) {
       renderCasesEditor(currentDraftData);
+    } else if (currentDraftData.story_id || currentDraftData.story_title) {
+      renderHUEditor(currentDraftData);
     } else {
       // Fallback si la estructura no coincide
       throw new Error('Estructura de JSON no soportada para edición interactiva.');
@@ -611,7 +612,7 @@ function renderHUEditor(hu) {
 }
 
 function renderCasesEditor(data) {
-  const cases = data.casos_prueba || data.cases || [];
+  const cases = data.test_cases || data.casos_prueba || data.cases || [];
   
   let casesHtml = '';
   cases.forEach((tc, caseIdx) => {
@@ -627,8 +628,12 @@ function renderCasesEditor(data) {
               <textarea class="editor-textarea step-action-input" rows="2">${escHtml(step.accion || step.action || '')}</textarea>
             </div>
             <div class="editor-form-group">
+              <label>Datos de prueba</label>
+              <textarea class="editor-textarea step-data-input" rows="2">${escHtml(step.data || step.datos || '')}</textarea>
+            </div>
+            <div class="editor-form-group">
               <label>Resultado Esperado</label>
-              <textarea class="editor-textarea step-expected-input" rows="2">${escHtml(step.resultado_esperado || step.expected || '')}</textarea>
+              <textarea class="editor-textarea step-expected-input" rows="2">${escHtml(step.resultado_esperado || step.expected_result || step.expected || '')}</textarea>
             </div>
           </div>
           <button class="btn btn--danger-outline btn-delete-step" type="button" style="margin-top: 18px;">Eliminar</button>
@@ -637,9 +642,7 @@ function renderCasesEditor(data) {
     });
 
     const priority = tc.prioridad || tc.priority || 'Alta';
-    const state = tc.state || tc.status || 'Design';
-    const autoStatus = tc.automation_status || tc.automationStatus || 'Not Automated';
-    const tag = tc.tags || tc.tag || 'WEB';
+    const caseType = (tc.type || tc.tags || tc.tag || 'api').toLowerCase();
 
     casesHtml += `
       <div class="editor-case-card" data-index="${caseIdx}">
@@ -663,31 +666,33 @@ function renderCasesEditor(data) {
             </select>
           </div>
           <div class="editor-form-group">
-            <label>Estado</label>
-            <select class="editor-select case-state-select">
-              <option value="Design" ${state === 'Design' ? 'selected' : ''}>Design</option>
-              <option value="Ready" ${state === 'Ready' ? 'selected' : ''}>Ready</option>
-            </select>
-          </div>
-          <div class="editor-form-group">
-            <label>Automatizado</label>
-            <select class="editor-select case-auto-select">
-              <option value="Not Automated" ${autoStatus === 'Not Automated' ? 'selected' : ''}>No Automatizado</option>
-              <option value="Automated" ${autoStatus === 'Automated' ? 'selected' : ''}>Automatizado</option>
-            </select>
-          </div>
-          <div class="editor-form-group">
-            <label>Tag (API / WEB)</label>
+            <label>Tipo (API / WEB)</label>
             <select class="editor-select case-tag-select">
-              <option value="WEB" ${tag === 'WEB' ? 'selected' : ''}>WEB</option>
-              <option value="API" ${tag === 'API' ? 'selected' : ''}>API</option>
+              <option value="api" ${caseType === 'api' ? 'selected' : ''}>API</option>
+              <option value="web" ${caseType === 'web' ? 'selected' : ''}>WEB</option>
             </select>
           </div>
         </div>
 
         <div class="editor-form-group">
-          <label>Area Path</label>
-          <input type="text" class="editor-input case-areapath-input" value="${escHtml(tc.area_path || tc.areaPath || 'AP31TPT-TERPELPOS-TRANSICION')}">
+          <label>Descripción</label>
+          <textarea class="editor-textarea case-description-input" rows="3">${escHtml(tc.description || tc.descripcion || '')}</textarea>
+        </div>
+        <div class="editor-form-group">
+          <label>Objetivo</label>
+          <textarea class="editor-textarea case-objective-input" rows="2">${escHtml(tc.objective || tc.objetivo || '')}</textarea>
+        </div>
+        <div class="editor-form-group">
+          <label>Rol</label>
+          <input type="text" class="editor-input case-role-input" value="${escHtml(tc.role || tc.rol || '')}">
+        </div>
+        <div class="editor-form-group">
+          <label>Precondiciones</label>
+          <textarea class="editor-textarea case-preconditions-input" rows="3">${escHtml(Array.isArray(tc.preconditions) ? tc.preconditions.join('\n') : Array.isArray(tc.precondiciones) ? tc.precondiciones.join('\n') : (tc.preconditions || tc.precondiciones || ''))}</textarea>
+        </div>
+        <div class="editor-form-group">
+          <label>Postcondiciones</label>
+          <textarea class="editor-textarea case-postcondition-input" rows="2">${escHtml(tc.post_condition || tc.postcondicion || '')}</textarea>
         </div>
 
         <div class="editor-steps-section">
@@ -740,31 +745,33 @@ function renderCasesEditor(data) {
           </select>
         </div>
         <div class="editor-form-group">
-          <label>Estado</label>
-          <select class="editor-select case-state-select">
-            <option value="Design">Design</option>
-            <option value="Ready">Ready</option>
-          </select>
-        </div>
-        <div class="editor-form-group">
-          <label>Automatizado</label>
-          <select class="editor-select case-auto-select">
-            <option value="Not Automated">No Automatizado</option>
-            <option value="Automated">Automated</option>
-          </select>
-        </div>
-        <div class="editor-form-group">
-          <label>Tag (API / WEB)</label>
+          <label>Tipo (API / WEB)</label>
           <select class="editor-select case-tag-select">
-            <option value="WEB">WEB</option>
-            <option value="API">API</option>
+            <option value="api">API</option>
+            <option value="web">WEB</option>
           </select>
         </div>
       </div>
 
       <div class="editor-form-group">
-        <label>Area Path</label>
-        <input type="text" class="editor-input case-areapath-input" value="AP31TPT-TERPELPOS-TRANSICION">
+        <label>Descripción</label>
+        <textarea class="editor-textarea case-description-input" rows="3" placeholder="Descripción del caso de prueba"></textarea>
+      </div>
+      <div class="editor-form-group">
+        <label>Objetivo</label>
+        <textarea class="editor-textarea case-objective-input" rows="2" placeholder="Objetivo del caso"></textarea>
+      </div>
+      <div class="editor-form-group">
+        <label>Rol</label>
+        <input type="text" class="editor-input case-role-input" value="" placeholder="Rol del usuario">
+      </div>
+      <div class="editor-form-group">
+        <label>Precondiciones</label>
+        <textarea class="editor-textarea case-preconditions-input" rows="3" placeholder="Una precondición por línea"></textarea>
+      </div>
+      <div class="editor-form-group">
+        <label>Postcondiciones</label>
+        <textarea class="editor-textarea case-postcondition-input" rows="2" placeholder="Postcondición del caso"></textarea>
       </div>
 
       <div class="editor-steps-section">
@@ -803,6 +810,10 @@ function renderCasesEditor(data) {
             <textarea class="editor-textarea step-action-input" rows="2" placeholder="Describe la acción"></textarea>
           </div>
           <div class="editor-form-group">
+            <label>Datos de prueba</label>
+            <textarea class="editor-textarea step-data-input" rows="2" placeholder="Datos necesarios para este paso"></textarea>
+          </div>
+          <div class="editor-form-group">
             <label>Resultado Esperado</label>
             <textarea class="editor-textarea step-expected-input" rows="2" placeholder="Describe el resultado esperado"></textarea>
           </div>
@@ -825,7 +836,8 @@ function renderCasesEditor(data) {
 }
 
 function serializeEditorData() {
-  if (currentDraftData.story_id || currentDraftData.story_title) {
+  const hasCases = Array.isArray(currentDraftData.test_cases) || Array.isArray(currentDraftData.casos_prueba) || Array.isArray(currentDraftData.cases);
+  if (!hasCases && (currentDraftData.story_id || currentDraftData.story_title)) {
     const acceptance_criteria = [];
     document.querySelectorAll('.ca-input-field').forEach(input => {
       const val = input.value.trim();
@@ -843,38 +855,35 @@ function serializeEditorData() {
     document.querySelectorAll('.editor-case-card').forEach(card => {
       const title = card.querySelector('.case-title-input').value.trim();
       const prioridad = card.querySelector('.case-priority-select').value;
-      const state = card.querySelector('.case-state-select').value;
-      const automationStatus = card.querySelector('.case-auto-select').value;
-      const tags = card.querySelector('.case-tag-select').value;
-      const areaPath = card.querySelector('.case-areapath-input').value.trim();
+      const type = card.querySelector('.case-tag-select').value;
 
       const pasos = [];
       card.querySelectorAll('.editor-step-row').forEach((row, idx) => {
         pasos.push({
           numero: idx + 1,
           accion: row.querySelector('.step-action-input').value.trim(),
+          data: row.querySelector('.step-data-input').value.trim(),
           resultado_esperado: row.querySelector('.step-expected-input').value.trim()
         });
       });
 
       cases.push({
         titulo: title,
-        criterios_aceptacion: [],
+        type,
+        description: card.querySelector('.case-description-input').value.trim(),
+        objective: card.querySelector('.case-objective-input').value.trim(),
+        role: card.querySelector('.case-role-input').value.trim(),
+        preconditions: card.querySelector('.case-preconditions-input').value.trim()
+          .split('\n').map(l => l.trim()).filter(Boolean),
+        post_condition: card.querySelector('.case-postcondition-input').value.trim(),
         prioridad,
-        precondiciones: [],
-        datos_prueba: [],
-        area_path: areaPath,
-        assigned_to: '',
-        state,
-        automation_status: automationStatus,
-        tags,
         pasos
       });
     });
 
-    return {
-      casos_prueba: cases
-    };
+    // Preservar todos los metadatos del JSON original; solo reemplazar el array de casos
+    const caseKey = Array.isArray(currentDraftData.test_cases) ? 'test_cases' : 'casos_prueba';
+    return { ...currentDraftData, [caseKey]: cases };
   }
 }
 

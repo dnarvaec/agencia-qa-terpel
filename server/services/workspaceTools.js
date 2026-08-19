@@ -52,6 +52,52 @@ function safePath(relativePath) {
   return resolved;
 }
 
+/**
+ * Repara saltos de línea y tabulaciones literales dentro de strings JSON generados por el LLM.
+ * Usa un state machine para distinguir caracteres dentro/fuera de strings JSON.
+ */
+function repairJsonControlChars(str) {
+  let result = '';
+  let inString = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inString) {
+      if (ch === '\\') {
+        result += ch + (str[++i] || '');
+      } else if (ch === '"') {
+        inString = false;
+        result += ch;
+      } else if (ch === '\n') {
+        result += '\\n';
+      } else if (ch === '\r') {
+        result += '\\r';
+      } else if (ch === '\t') {
+        result += '\\t';
+      } else {
+        result += ch;
+      }
+    } else {
+      if (ch === '"') inString = true;
+      result += ch;
+    }
+  }
+  return result;
+}
+
+/**
+ * Intenta parsear JSON con múltiples estrategias de reparación en cascada.
+ * Retorna el objeto parseado, o null si todas las estrategias fallan.
+ */
+function tryParseJson(text) {
+  try { return JSON.parse(text); } catch (_) {}
+  try { return JSON.parse(repairJsonControlChars(text)); } catch (_) {}
+  // Eliminar trailing commas antes de } o ] (error típico del LLM)
+  const noTrailing = text.replace(/,(\s*[}\]])/g, '$1');
+  try { return JSON.parse(noTrailing); } catch (_) {}
+  try { return JSON.parse(repairJsonControlChars(noTrailing)); } catch (_) {}
+  return null;
+}
+
 /** Definiciones de las herramientas en formato OpenAI */
 const WORKSPACE_TOOL_DEFS = [
   {
@@ -265,20 +311,34 @@ function writeFile({ path: relativePath, content }) {
   let safeContent = content;
 
   if (typeof content === 'object') {
-    // Si manda un objeto, lo convertimos a JSON bonito
     safeContent = JSON.stringify(content, null, 2);
   } else if (typeof content === 'string') {
-    // 1. Eliminar cualquier byte NUL (\x00) que corrompa el archivo en Windows
     safeContent = safeContent.replace(/\0/g, '');
 
-    // 2. Si el string parece un JSON plano, lo parseamos y lo formateamos bonito
-    const trimmed = safeContent.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try {
-        const parsed = JSON.parse(trimmed);
+    // Eliminar markdown fences que el LLM a veces envuelve alrededor del JSON
+    let textToTry = safeContent.trim();
+    const fenceMatch = textToTry.match(/^```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```\s*$/);
+    if (fenceMatch) textToTry = fenceMatch[1].trim();
+
+    const looksLikeJson =
+      (textToTry.startsWith('{') && textToTry.endsWith('}')) ||
+      (textToTry.startsWith('[') && textToTry.endsWith(']')) ||
+      /\.json$/i.test(relativePath);
+
+    if (looksLikeJson) {
+      const parsed = tryParseJson(textToTry);
+      if (parsed !== null) {
         safeContent = JSON.stringify(parsed, null, 2);
-      } catch (_) {
-        // Si no es un JSON válido (ej. es un Markdown), se deja como texto normal
+      } else {
+        // JSON inválido irrecuperable → rechazar y devolver error al LLM para que lo corrija
+        return [
+          `Error: El JSON generado para "${relativePath}" no es válido y no pudo repararse. El archivo NO fue guardado.`,
+          `Debes volver a llamar workspace__writeFile con el JSON corregido. Reglas obligatorias:`,
+          `- Escapa las comillas dentro de strings: \\"`,
+          `- Saltos de línea dentro de strings como \\n (nunca saltos reales)`,
+          `- Sin trailing commas antes de } o ]`,
+          `- Sin bloques markdown (\`\`\`json) — solo el objeto JSON puro`,
+        ].join('\n');
       }
     }
   } else {
@@ -457,4 +517,4 @@ async function executeCommand({ command, cwd: relativeCwd = '.', timeout = 120_0
   });
 }
 
-module.exports = { WORKSPACE_TOOL_DEFS, callWorkspaceTool };
+module.exports = { WORKSPACE_TOOL_DEFS, callWorkspaceTool, repairJsonControlChars, tryParseJson };

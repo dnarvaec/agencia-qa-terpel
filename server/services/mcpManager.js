@@ -186,9 +186,9 @@ class MCPManager {
     return this.getAllTools()
       .filter(({ serverName, tool }) => {
         if (!allowedSet) return true;
-        // El YAML usa "azure-devops/wit_get_work_item" y el servidor MCP usa "wit_get_work_item"
-        const key = `${serverName}/${tool.name}`.toLowerCase();
-        return allowedSet.has(key);
+        const key        = `${serverName}/${tool.name}`.toLowerCase();
+        const wildcard   = `${serverName}/*`.toLowerCase();
+        return allowedSet.has(key) || allowedSet.has(wildcard);
       })
       .map(({ serverName, tool }) => {
         const serverKey  = serverName.replace(/-/g, '_');

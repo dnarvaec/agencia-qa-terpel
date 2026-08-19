@@ -18,7 +18,8 @@ const path = require('path');
 const { getAgent, getSkills } = require('./agentReader');
 const MCPManager = require('./mcpManager');
 const { WORKSPACE_TOOL_DEFS,
-  callWorkspaceTool } = require('./workspaceTools');
+  callWorkspaceTool,
+  repairJsonControlChars } = require('./workspaceTools');
 
 const WORKSPACE_ROOT = path.resolve(__dirname, '../../');
 const PROJECT_CONTEXT_FILE = path.join(WORKSPACE_ROOT, '.github/context/contexto.md');
@@ -236,6 +237,14 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
     }
 
     if (server === 'azure-devops') {
+      // Comodín azure-devops/* → exponer todas las herramientas sin filtrar
+      if (yamlServerTools.some(t => t.endsWith('/*'))) {
+        const allActual = mcpManager.getServerTools(server);
+        effectiveFilter.push(...allActual.map(t => `${server}/${t.name}`));
+        console.log(`[agentRunner] Servidor '${server}': ${allActual.length} tools (comodín /* → todas)`);
+        continue;
+      }
+
       // Paso 1: menciones explícitas en el system prompt.
       // Si el prompt menciona herramientas que no existen en el MCP real,
       // no debemos dejar al agente con 0 herramientas. Por eso intersectamos
@@ -413,6 +422,9 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   let injectedSaveStep = false; // ¿ya inyectamos el mensaje de guardado?
   let saveStepIter = 0;     // iteraciones transcurridas desde la inyección del save-step
   const writtenFilesSet = new Set(); // rutas únicas de archivos guardados durante la ejecución
+  // Detector de bucle — rastrea iteraciones consecutivas con tool calls idénticos
+  let sameToolCallStreak = 0;
+  let lastToolCallSignature = null;
 
   try {
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
@@ -559,12 +571,17 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
         try {
           args = JSON.parse(toolCall.function.arguments);
         } catch (parseErr) {
-          // Si el LLM falla al escapar comillas/saltos de línea (típico en .md),
-          // le devolvemos el error explícito para que él mismo corrija su formato.
-          const errMsg = `Error de formato: Los argumentos no son un JSON válido. Asegúrate de escapar bien las comillas (\\") y los saltos de línea (\\n). Detalle: ${parseErr.message}`;
-          onProgress({ type: 'tool-error', message: `✗ Error de escape JSON en ${toolCall.function.name}` });
-          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errMsg });
-          continue; // Saltamos la ejecución, el LLM intentará de nuevo en la siguiente iteración
+          // Reparar caracteres de control literales (newlines, tabs) dentro de strings JSON
+          // — causa más común de argumentos inválidos generados por el LLM.
+          try {
+            args = JSON.parse(repairJsonControlChars(toolCall.function.arguments));
+            onProgress({ type: 'info', message: `🔧 Argumentos JSON reparados automáticamente (${toolCall.function.name})` });
+          } catch (_repairErr) {
+            const errMsg = `Error de formato: Los argumentos no son un JSON válido. Asegúrate de escapar bien las comillas (\\") y los saltos de línea (\\n). Detalle: ${parseErr.message}`;
+            onProgress({ type: 'tool-error', message: `✗ Error de escape JSON en ${toolCall.function.name}` });
+            messages.push({ role: 'tool', tool_call_id: toolCall.id, content: errMsg });
+            continue;
+          }
         }
 
         const isWorkspaceTool = workspaceNames.has(toolCall.function.name);
@@ -579,15 +596,17 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
           if (isWorkspaceTool) {
             // ── Workspace tool (sistema de archivos local) ──────────────
             const toolShortName = toolCall.function.name.replace('workspace__', '');
-            if (toolShortName === 'writeFile') {
-              hasWrittenFiles = true; // marcar guardado
-              if (args.path) writtenFilesSet.add(args.path);
-            } else if (toolShortName === 'executeCommand') {
+            if (toolShortName === 'executeCommand') {
               hasExecutedCommand = true; // modo ejecución — save-step no debe activarse
             }
             // fetchUrl devuelve una Promise; await funciona para síncronos y asíncronos
             const result = await Promise.resolve(callWorkspaceTool(toolShortName, args));
             toolResultContent = result;
+            // Marcar guardado solo si writeFile tuvo éxito (sin error de validación JSON)
+            if (toolShortName === 'writeFile' && !String(result).startsWith('Error:')) {
+              hasWrittenFiles = true;
+              if (args.path) writtenFilesSet.add(args.path);
+            }
             onProgress({
               type: 'tool-result',
               message: `← [workspace] ${String(result).substring(0, 500)}${String(result).length > 500 ? '\n…(truncado)' : ''}`,
@@ -625,6 +644,34 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
           content: toolResultContent,
         });
       } // fin for toolCall
+
+      // ── Detector de bucle de herramientas ─────────────────────────────────
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        const iterSig = msg.tool_calls
+          .map(tc => `${tc.function.name}::${tc.function.arguments}`)
+          .join('|');
+        if (iterSig === lastToolCallSignature) {
+          sameToolCallStreak++;
+        } else {
+          sameToolCallStreak = 1;
+          lastToolCallSignature = iterSig;
+        }
+        if (sameToolCallStreak >= 3) {
+          const loopedTool = msg.tool_calls[0].function.name;
+          onProgress({ type: 'warning', message: `⚠️ Bucle detectado: "${loopedTool}" × ${sameToolCallStreak} — inyectando break…` });
+          messages.push({
+            role: 'user',
+            content: `ALERTA DE BUCLE DETECTADO: Llevas ${sameToolCallStreak} iteraciones consecutivas llamando "${loopedTool}" con exactamente los mismos argumentos y obteniendo siempre el mismo resultado. Ya tienes esa información. NO vuelvas a llamar esa herramienta. Continúa inmediatamente con el SIGUIENTE PASO de tu workflow sin más verificaciones previas.`,
+          });
+          sameToolCallStreak = 0;
+          lastToolCallSignature = null;
+          // Evitar que el save-step se active antes de que el agente haga trabajo real
+          if (!hasWrittenFiles) hasCalledAnyTool = false;
+        }
+      } else {
+        sameToolCallStreak = 0;
+        lastToolCallSignature = null;
+      }
 
       // ── Corte de seguridad en el save-step ────────────────────────────────
       // Después de inyectar el mensaje de guardado el modelo termina normalmente

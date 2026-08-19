@@ -14,6 +14,7 @@ const { getDashboardData, parseMarkdownHU } = require('./services/dashboardServi
 const MCPClient   = require('./services/mcpClient');
 const fabricClient = require('./services/fabricClient');
 const powerbiClient = require('./services/powerbiClient');
+const { repairJsonControlChars, tryParseJson } = require('./services/workspaceTools');
 
 const app = express();
 const server = http.createServer(app);
@@ -73,7 +74,14 @@ app.get('/api/read-draft', (req, res) => {
     const content = fs.readFileSync(abs, 'utf8');
     try {
       res.json(JSON.parse(content));
-    } catch (parseErr) {
+    } catch (_) {
+      // Intentar reparar con todas las estrategias disponibles
+      const parsed = tryParseJson(content.trim());
+      if (parsed !== null) {
+        res.json(parsed);
+        return;
+      }
+      // Último recurso: intentar reconstruir desde el .md equivalente
       console.warn(`JSON corrupto en ${relPath}, intentando fallback a Markdown...`);
       const mdRelPath = relPath.replace(/\.json$/, '.md');
       const absMd = path.resolve(WORKSPACE_ROOT, mdRelPath);
@@ -86,7 +94,7 @@ app.get('/api/read-draft', (req, res) => {
         }
         res.json(parsedHU);
       } else {
-        throw parseErr;
+        res.status(422).json({ error: 'El archivo JSON está corrupto y no se pudo reparar automáticamente.' });
       }
     }
   } catch (err) {
@@ -117,22 +125,151 @@ app.post('/api/save-draft', async (req, res) => {
       const absMd = path.resolve(WORKSPACE_ROOT, mdRelPath);
       const hu = content;
       
-      const mdContent = `---
-story_id: "${hu.story_id || ''}"
-story_title: "${hu.story_title || ''}"
-score_initial: ${hu.score_initial || 0}
-score_final: ${hu.score_final || 0}
----
+      const bodyLines = [
+        `# HU #${hu.story_id || ''}: ${hu.story_title || ''}`,
+        ``,
+        `## Descripción`,
+        hu.story_description || '',
+        ``,
+        `## Criterios de Aceptación`,
+        Array.isArray(hu.acceptance_criteria)
+          ? hu.acceptance_criteria.map(ca => `- ${ca}`).join('\n')
+          : '',
+      ];
+      if (hu.key_improvements) {
+        bodyLines.push(``, `## Mejoras Aplicadas`, hu.key_improvements);
+      }
 
-# HU #${hu.story_id || ''}: ${hu.story_title || ''}
+      // Metadatos al final — mismos campos y orden que el JSON
+      const metaFields = [];
+      if (hu.score_initial != null || hu.score_final != null)
+        metaFields.push(`**Score inicial:** ${hu.score_initial ?? 0} → **Score final:** ${hu.score_final ?? 0}`);
+      if (hu.iterations_count != null)
+        metaFields.push(`**Iteraciones:** ${hu.iterations_count}`);
+      if (hu.source)
+        metaFields.push(`**Fuente:** ${hu.source}`);
+      if (hu.azure_devops_id)
+        metaFields.push(`**ID Azure DevOps:** ${hu.azure_devops_id}`);
+      if (hu.project)
+        metaFields.push(`**Proyecto:** ${hu.project}`);
+      if (hu.generated_at)
+        metaFields.push(`**Generado:** ${hu.generated_at}`);
+      if (metaFields.length > 0) {
+        bodyLines.push(``, `---`, ...metaFields);
+      }
 
-## Descripción
-${hu.story_description || ''}
-
-## Criterios de Aceptación
-${Array.isArray(hu.acceptance_criteria) ? hu.acceptance_criteria.map(ca => `- ${ca}`).join('\n') : ''}
-`;
+      const mdContent = `${bodyLines.join('\n')}\n`;
       fs.writeFileSync(absMd, mdContent, 'utf8');
+      generatedFiles.push(mdRelPath);
+
+    } else if (Array.isArray(content.casos_prueba) || Array.isArray(content.test_cases)) {
+      // Generar .md para casos de prueba
+      const mdRelPath = relPath.replace(/\.json$/, '.md');
+      const absMd = path.resolve(WORKSPACE_ROOT, mdRelPath);
+      const cases = content.casos_prueba || content.test_cases || [];
+      const storyIdMatch = path.basename(relPath).match(/^(\d+)/);
+      const storyId = content.story_id || (storyIdMatch ? storyIdMatch[1] : '');
+      const storyTitle = content.story_title || '';
+
+      const tcLines = [
+        `# Casos de Prueba${storyId ? ` — HU-${storyId}` : ''}${storyTitle ? `: ${storyTitle}` : ''}`,
+        ``,
+      ];
+
+      if (content.generated_at) tcLines.push(`**Fecha de generación:** ${content.generated_at}`, ``);
+
+      if (content.environment && Object.keys(content.environment).length > 0) {
+        const envCols = Object.keys(content.environment);
+        tcLines.push(`## Entorno`);
+        tcLines.push(`| ${envCols.map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(' | ')} |`);
+        tcLines.push(`| ${envCols.map(() => '---').join(' | ')} |`);
+        tcLines.push(`| ${envCols.map(c => String(content.environment[c] || 'N/A').replace(/\|/g, '&#124;')).join(' | ')} |`);
+        tcLines.push(``);
+      }
+
+      if (content.credentials) {
+        const credRows = Object.values(content.credentials).filter(Array.isArray).flat();
+        tcLines.push(`## Credenciales`);
+        tcLines.push(`| Usuario | Rol | Contraseña |`);
+        tcLines.push(`|---------|-----|------------|`);
+        if (credRows.length > 0) {
+          credRows.forEach(r => tcLines.push(`| ${r.usuario || r.user || 'N/A'} | ${r.rol || r.role || ''} | ${r.contrasena || r.password || ''} |`));
+        } else {
+          tcLines.push(`| N/A | (ver .env) | (ver .env) |`);
+        }
+        tcLines.push(``);
+      }
+
+      if (content.summary) {
+        const s = content.summary;
+        tcLines.push(`## Resumen`);
+        tcLines.push(`| Total Web | Total API | Total Manual | Total |`);
+        tcLines.push(`|-----------|-----------|--------------|-------|`);
+        tcLines.push(`| ${s.total_web ?? 0} | ${s.total_api ?? 0} | ${s.total_manual ?? 0} | ${s.total ?? cases.length} |`);
+        tcLines.push(``);
+      }
+
+      tcLines.push(`## Casos de Prueba`, ``);
+
+      cases.forEach((tc) => {
+        const titulo = tc.titulo || tc.title || '';
+        const id = tc.id || '';
+        const tipo = (tc.type || tc.tags || tc.tag || 'api').toLowerCase();
+        const prioridad = (tc.prioridad || tc.priority || '').toLowerCase();
+        const pasos = tc.pasos || tc.steps || [];
+        const preconds = tc.preconditions || tc.precondiciones || [];
+        const rol = (tc.role || tc.rol || '').replace(/\|/g, '&#124;');
+        const obj = (tc.objective || tc.objetivo || '').replace(/\|/g, '&#124;');
+
+        tcLines.push(`---`, ``);
+        tcLines.push(id ? `### ${id} — ${titulo}` : `### ${titulo}`, ``);
+        tcLines.push(`| Tipo | Prioridad | Rol | Objetivo |`);
+        tcLines.push(`|------|-----------|-----|---------|`);
+        tcLines.push(`| ${tipo} | ${prioridad} | ${rol} | ${obj} |`);
+        tcLines.push(``);
+
+        if (tc.description || tc.descripcion) {
+          tcLines.push(`**Descripción:**`, tc.description || tc.descripcion, ``);
+        }
+
+        if (Array.isArray(preconds) && preconds.length > 0) {
+          tcLines.push(`**Precondiciones:**`);
+          preconds.forEach(p => tcLines.push(`- ${p}`));
+          tcLines.push(``);
+        }
+
+        if (pasos.length > 0) {
+          tcLines.push(`**Pasos:**`);
+          tcLines.push(`| # | Acción | Datos de prueba | Resultado Esperado |`);
+          tcLines.push(`|---|--------|----------------|-------------------|`);
+          pasos.forEach(p => {
+            const num  = p.numero || p.order || '';
+            const acc  = (p.accion || p.action || '').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+            const data = (p.data   || p.datos  || '').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+            const exp  = (p.resultado_esperado || p.expected_result || p.expected || '').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+            tcLines.push(`| ${num} | ${acc} | ${data} | ${exp} |`);
+          });
+          tcLines.push(``);
+        }
+
+        if (tc.post_condition || tc.postcondicion) {
+          tcLines.push(`**Post-condición:**`, tc.post_condition || tc.postcondicion, ``);
+        }
+
+        const acCovered = tc.acceptance_criteria_covered || tc.criterios_aceptacion_cubiertos;
+        if (Array.isArray(acCovered) && acCovered.length > 0) {
+          tcLines.push(`**Criterios de Aceptación cubiertos:**`);
+          acCovered.forEach(ac => tcLines.push(`- ${ac}`));
+          tcLines.push(``);
+        }
+
+        if (tc.automation_notes || tc.notas_automatizacion) {
+          tcLines.push(`**Notas de Automatización:**`, tc.automation_notes || tc.notas_automatizacion, ``);
+        }
+      });
+
+      const tcMdContent = `${tcLines.join('\n')}\n`;
+      fs.writeFileSync(absMd, tcMdContent, 'utf8');
       generatedFiles.push(mdRelPath);
     }
 
