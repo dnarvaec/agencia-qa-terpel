@@ -1,0 +1,35 @@
+{
+  "valid": {
+    "customerCode":     "0010261681",
+    "idNumber":         "9002225127",
+    "idTypeCode":       "31",
+    "businessName":     "SEPTICLEAN SAS ESP",
+    "telephoneNumber":  "68845868",
+    "email":            "co.radicacionfacturas@veolia.com",
+    "customerType":     "Credito",
+    "status":           "Activo",
+    "companyCode":      "1000",
+    "salesOffice":      "160",
+    "cityCode":         "17001",
+    "countryCode":      "CO",
+    "departmentCode":   "17",
+    "modificationDate": "2022-10-31",
+    "modificationHour": "08:46:46"
+  },
+  "missingCustomerCode": {
+    "idNumber":         "9002225127",
+    "idTypeCode":       "31",
+    "businessName":     "SEPTICLEAN SAS ESP",
+    "telephoneNumber":  "68845868",
+    "email":            "co.radicacionfacturas@veolia.com",
+    "customerType":     "Credito",
+    "status":           "Activo",
+    "companyCode":      "1000",
+    "salesOffice":      "160",
+    "cityCode":         "17001",
+    "countryCode":      "CO",
+    "departmentCode":   "17",
+    "modificationDate": "2022-10-31",
+    "modificationHour": "08:46:46"
+  }
+}

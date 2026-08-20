@@ -1,0 +1,29 @@
+{
+  "valid": {
+    "delivery":        "1483115903",
+    "documentDate":    "2026-07-17",
+    "wayBill":         "000032701374296",
+    "logisticCenter":  "1OQ5",
+    "supplyingCenter": "1P02",
+    "productList": [
+      { "product": "000000000000001664", "quantity": 96, "unit": "UG6", "salesCostValue": "0" }
+    ],
+    "frontierLaw":     "1",
+    "status":          "1",
+    "modificationDate": "2026-07-17",
+    "modificationHour": "08:07:00"
+  },
+  "missingDelivery": {
+    "documentDate":    "2026-07-17",
+    "wayBill":         "000032701374296",
+    "logisticCenter":  "1OQ5",
+    "supplyingCenter": "1P02",
+    "productList": [
+      { "product": "000000000000001664", "quantity": 96, "unit": "UG6", "salesCostValue": "0" }
+    ],
+    "frontierLaw":     "1",
+    "status":          "1",
+    "modificationDate": "2026-07-17",
+    "modificationHour": "08:07:00"
+  }
+}

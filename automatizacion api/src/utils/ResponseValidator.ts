@@ -25,7 +25,7 @@ export class ResponseValidator {
     partial: Partial<T>
   ): Promise<T> {
     const body = await response.json() as T;
-    expect(body).toMatchObject(partial);
+    expect(body as Record<string, unknown>).toMatchObject(partial as Record<string, unknown>);
     return body;
   }
 

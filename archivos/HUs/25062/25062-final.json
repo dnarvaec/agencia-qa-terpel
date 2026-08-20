@@ -1,0 +1,24 @@
+{
+  "story_id": "25062",
+  "story_title": "SAP - Servicio creación de EDS que envia SAP",
+  "story_description": "Como responsable de datos maestros, quiero que se desarrolle un servicio expuesto hacia SAP, que integre automáticamente las Estaciones de Servicio (EDS) creadas en SAP al sistema de información del Holding (HO). Esto permitirá que todos los campos enviados desde SAP sean correctamente incorporados y gestionados, asegurando la interoperabilidad entre plataformas.\n\nActualmente, las EDS generadas en SAP deben reflejarse en el HO, transfiriendo datos como centro logístico, nombre, tipo, regional, sociedad, cliente, y demás campos relevantes exigidos tanto por SAP como por el HO. Dado que ciertos campos obligatorios en el HO (país, departamento, dirección, correo, teléfono) no son enviados por SAP, el sistema debe asignarlos automáticamente con base en la ciudad recibida, o bien, permitir su registro posterior por parte del usuario responsable.\n\nAsimismo, el usuario debe poder consultar y modificar los registros de EDS integrados (excepto el campo centro logístico, salvo casos de retoma entre compañías), manteniendo además la funcionalidad de creación para estaciones afiliadas y asociando correctamente las regionales en la reportería. Cada nueva EDS debe crear la cola correspondiente en el datalake de MDM para asegurar la trazabilidad. Esta integración optimiza la gestión y configuración de las EDS a nivel corporativo y garantiza la continuidad operativa entre SAP y el HO.",
+  "acceptance_criteria": [
+    "Escenario:(001) integrar en el HO las EDS creadas en SAPDado:  que se requiere integrar en la Web las EDS que se crean en SAPCuando:  se bajen a data maestra y se reciban los datos de que envia SAPCentro Logístico, Nombre CentroTipo centro logístico: se indica tipo de EDS - DEUNA, EDS, KCO, TDCRegionalSociedadClienteLibro CajaCentro de CostoCentro de beneficioCiudadCod Unico EdsPropia, Afiliada, Franquicia, MasserEstadoFecha ActualizaciónHora ActualizaciónEntonces : esas EDS´s deben reflejarse en el HOY  en SAP al crear las EDS´s se les asigna un código únicoY  en el HO, para la creación de la EDS los campos de país y departamento son obligatorios, como estos datos no se envían de SAP se deben relacionar de forma automática, respecto a la ciudad que envía SAPY en el HO actualmente al crear una EDS son obligatorios los campos dirección, correo y teléfono, pero esos campos no envían los SAP. Se deben integrar las EDS´s sin estos datos y posteriormente el cliente los debe poder asignar de forma manual",
+    "Escenario:(002 ) Consulta en el HO de las EDS´s integradas de SAPDado:  que integran en el HO las EDS´s que se crean en SAPCuando:   se quieran consultarEntonces: se deben poder consultar en el HO en la opción gestión y configuración de EDS",
+    "Escenario:(003) EDS integrado en el HO que vienen de SAPDado:  que se requiere integrar en la Web las EDS que se crean en SAPCuando: en el HO  se consulte una EDS integrada de SAPEntonces:  en el HO se podrán modificar todos los campos a excepción de centro logísticoY en Terpel POS se debe permitir modificar el campo regional de las EDSY para Las EDS´s que pasan de retomas (pasan de MASSER a franquicia ) se deben poder modificar (modifica el centro logístico )",
+    "En SAP las estaciones manejan centro logístico.",
+    "El dato maestro debe extenderse a los PDV, tanto del centro logístico de MASSER como el de Terpel, para agilizar la configuración en el proceso de entrega y recibo de EDS entre compañías.",
+    "En el datalake se debe crear la cola con cada EDS que se cree a nivel de MDM.",
+    "La funcionalidad de creación EDS actual debe mantenerse para las afiliadas.",
+    "En la reportería se debe tener la regional asociada a la EDS.",
+    "El contrato de servicio técnico debe estar alineado con esta definición funcional."
+  ],
+  "score_initial": 5,
+  "score_final": 8,
+  "iterations_count": 2,
+  "key_improvements": "Redacción profesional, criterios explícitos y testeables, separación de casos y reglas de negocio, aclaración de contexto y motivación, formato INVEST.",
+  "source": "azure-devops",
+  "azure_devops_id": "25062",
+  "project": "AP31TP-TERPEL-POS",
+  "generated_at": "2024-06-18T21:25:00Z"
+}

@@ -26,9 +26,10 @@ const resultTitle     = document.getElementById('resultTitle');
 const resultDesc      = document.getElementById('resultDesc');
 
 // -- State --------------------------------------------------------------------
-let agents    = [];
-let isRunning = false;
+let agents       = [];
+let isRunning    = false;
 let cancelledByUser = false; // evita que agent-done sobreescriba el mensaje de cancelación
+let currentPrompt = ''; // prompt de la ejecución activa (para distinguir mejora vs publicación)
 
 // -- Socket.IO ----------------------------------------------------------------
 const socket = io({ transports: ['websocket', 'polling'] });
@@ -207,6 +208,7 @@ function startRun() {
   const agentId = agentSelect.value;
   const prompt  = promptInput.value.trim();
   if (!agentId || !prompt || isRunning) return;
+  currentPrompt = prompt;
 
   isRunning = true;
   runBtn.classList.add('running');
@@ -259,9 +261,11 @@ function finishRun(success, errorMsg, files) {
     return;
   }
 
-  // Verificar si podemos cargar un borrador interactivo (HU / Casos de Prueba)
+  // El editor interactivo solo aplica cuando la tarea fue crear/mejorar un borrador local.
+  // Si el prompt indica una publicación a Azure, saltar directamente al resultado.
+  const isAzurePublish = /\b(sub[ie]r|upload|publicar|work.?item|test.?plan|comentario)\b/i.test(currentPrompt);
   const jsonPath = findJsonFile(files || []);
-  if (jsonPath) {
+  if (jsonPath && !isAzurePublish) {
     openInteractiveEditor(jsonPath, files, agentSelect.value);
   } else {
     // Flujo normal directo

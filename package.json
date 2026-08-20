@@ -1,7 +1,7 @@
 {
   "name": "agencia-qa",
   "version": "1.0.0",
-  "description": "Agencia de agentes QA con IA — NTT DATA x Comfama",
+  "description": "Agencia de agentes QA con IA — NTT DATA",
   "scripts": {
     "test:web": "playwright test --config \"automatizacion web/playwright.config.ts\"",
     "test:web:headed": "playwright test --config \"automatizacion web/playwright.config.ts\" --headed",
@@ -24,7 +24,9 @@
     "express": "^4.21.2",
     "glob": "^11.0.0",
     "openai": "^4.98.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

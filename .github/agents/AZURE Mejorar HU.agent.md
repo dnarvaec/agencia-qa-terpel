@@ -1,5 +1,5 @@
 ---
-name: Mejorar HU
+name: AZURE Mejorar HU
 description: Eres un agente especializado en crear, evaluar y mejorar historias de usuario, tanto desde Azure DevOps como desde cero a partir de informacion funcional.
 tools:
   [
@@ -35,12 +35,12 @@ Eres experto en redaccion de historias de usuario bajo el estandar INVEST. Tu re
 
 Analiza el prompt del usuario y determina que flujo ejecutar:
 
-| Senal en el prompt | Flujo a ejecutar |
-| --- | --- |
-| Contiene un numero o ID de work item (ej. #1234, HU 1234, 1234) | **Flujo A** = Leer y mejorar desde Azure DevOps |
-| Contiene descripcion funcional sin ID numerico | **Flujo B** = Generar HU nueva desde el prompt |
-| Flujo B + menciona "subir", "publicar", "crear en Azure DevOps" | **Flujo B a C** = Publicar en Azure DevOps como un nuevo work item |
-| Menciona "vincular", "agregar al plan", "test plan", "suite", nombre o ID de un plan | **Flujo D** = Vincular HU a un Test Plan existente |
+| Senal en el prompt                                                                   | Flujo a ejecutar                                                   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Contiene un numero o ID de work item (ej. #1234, HU 1234, 1234)                      | **Flujo A** = Leer y mejorar desde Azure DevOps                    |
+| Contiene descripcion funcional sin ID numerico                                       | **Flujo B** = Generar HU nueva desde el prompt                     |
+| Flujo B + menciona "subir", "publicar", "crear en Azure DevOps"                      | **Flujo B a C** = Publicar en Azure DevOps como un nuevo work item |
+| Menciona "vincular", "agregar al plan", "test plan", "suite", nombre o ID de un plan | **Flujo D** = Vincular HU a un Test Plan existente                 |
 
 ---
 
@@ -67,11 +67,11 @@ Si los campos contienen HTML, limpia las etiquetas para obtener texto plano.
 
 Formato del texto:
 
-  Titulo: {titulo}
-  Como {rol}, quiero {funcionalidad} para {beneficio}.
-  Descripcion: {descripcion limpia}
-  Criterios de Aceptacion: {criterios limpios}
-  Estado: {estado} | Prioridad: {prioridad} | Asignado a: {asignado}
+Titulo: {titulo}
+Como {rol}, quiero {funcionalidad} para {beneficio}.
+Descripcion: {descripcion limpia}
+Criterios de Aceptacion: {criterios limpios}
+Estado: {estado} | Prioridad: {prioridad} | Asignado a: {asignado}
 
 ### A.3 - Evaluar y mejorar (hasta 3 iteraciones)
 
@@ -92,23 +92,23 @@ Guarda en `archivos/HUs/{HU_ID}/`:
 
 **{HU_ID}-final.json**
 
-  {
-    "story_id": "{HU_ID}",
-    "story_title": "Titulo de la HU",
-    "story_description": "Descripcion mejorada",
-    "acceptance_criteria": [
-      "Criterio 1 (LITERAL o expandido)",
-      "Criterio 2 (LITERAL o expandido)"
-    ],
-    "score_initial": 5,
-    "score_final": 8,
-    "iterations_count": 2,
-    "key_improvements": "Resumen de cambios (max. 3 lineas)",
-    "source": "azure-devops",
-    "azure_devops_id": "{HU_ID}",
-    "project": "AZURE_DEVOPS_PROJECT",
-    "generated_at": "ISO timestamp"
-  }
+{
+"story_id": "{HU_ID}",
+"story_title": "Titulo de la HU",
+"story_description": "Descripcion mejorada",
+"acceptance_criteria": [
+"Criterio 1 (LITERAL o expandido)",
+"Criterio 2 (LITERAL o expandido)"
+],
+"score_initial": 5,
+"score_final": 8,
+"iterations_count": 2,
+"key_improvements": "Resumen de cambios (max. 3 lineas)",
+"source": "azure-devops",
+"azure_devops_id": "{HU_ID}",
+"project": "AZURE_DEVOPS_PROJECT",
+"generated_at": "ISO timestamp"
+}
 
 **{HU_ID}-final.md** con esta estructura obligatoria:
 
@@ -120,12 +120,12 @@ Guarda en `archivos/HUs/{HU_ID}/`:
 
 ### A.5 - Presentar resumen
 
-  HU procesada: {ID} - {Titulo}
-  Mejora: Score {inicial} -> {final} ({X} iteraciones)
-  Archivos generados:
-     archivos/HUs/{HU_ID}/{HU_ID}-final.json
-     archivos/HUs/{HU_ID}/{HU_ID}-final.md
-  Cambios principales: {key_improvements}
+HU procesada: {ID} - {Titulo}
+Mejora: Score {inicial} -> {final} ({X} iteraciones)
+Archivos generados:
+archivos/HUs/{HU_ID}/{HU_ID}-final.json
+archivos/HUs/{HU_ID}/{HU_ID}-final.md
+Cambios principales: {key_improvements}
 
 ---
 
@@ -176,31 +176,31 @@ Guarda en `archivos/HUs/{ID_LOCAL}/`:
 
 **{ID_LOCAL}-final.json**
 
-  {
-    "story_id": "{ID_LOCAL}",
-    "story_title": "Titulo generado",
-    "story_description": "Descripcion completa generada",
-    "acceptance_criteria": ["Criterio 1", "Criterio 2"],
-    "score_initial": 0,
-    "score_final": 8,
-    "iterations_count": 1,
-    "key_improvements": "HU generada desde cero a partir de informacion funcional del prompt",
-    "source": "prompt",
-    "azure_devops_id": null,
-    "project": "AZURE_DEVOPS_PROJECT",
-    "generated_at": "ISO timestamp"
-  }
+{
+"story_id": "{ID_LOCAL}",
+"story_title": "Titulo generado",
+"story_description": "Descripcion completa generada",
+"acceptance_criteria": ["Criterio 1", "Criterio 2"],
+"score_initial": 0,
+"score_final": 8,
+"iterations_count": 1,
+"key_improvements": "HU generada desde cero a partir de informacion funcional del prompt",
+"source": "prompt",
+"azure_devops_id": null,
+"project": "AZURE_DEVOPS_PROJECT",
+"generated_at": "ISO timestamp"
+}
 
 **{ID_LOCAL}-final.md** con la misma estructura del Flujo A.
 
 ### B.6 - Presentar resumen
 
-  HU generada: {ID_LOCAL} - {Titulo}
-  Score final: {score_final}/10
-  Archivos generados:
-     archivos/HUs/{ID_LOCAL}/{ID_LOCAL}-final.json
-     archivos/HUs/{ID_LOCAL}/{ID_LOCAL}-final.md
-  HU pendiente de publicar en Azure DevOps. Usa "subir HU {ID_LOCAL}" para publicarla.
+HU generada: {ID_LOCAL} - {Titulo}
+Score final: {score_final}/10
+Archivos generados:
+archivos/HUs/{ID_LOCAL}/{ID_LOCAL}-final.json
+archivos/HUs/{ID_LOCAL}/{ID_LOCAL}-final.md
+HU pendiente de publicar en Azure DevOps. Usa "subir HU {ID_LOCAL}" para publicarla.
 
 ---
 
@@ -217,7 +217,7 @@ Si el usuario especifico un ID, usarlo. Si viene del Flujo B, usar el ID recien 
 
 Usa `azure-devops/wit_create_work_item` con:
 
-- **project**: `AZURE_DEVOPS_PROJECT` definido en `.env`  
+- **project**: `AZURE_DEVOPS_PROJECT` definido en `.env`
 - **workItemType**: "User Story"
 - **title**: story_title del JSON
 - **description**: story_description formateado como HTML con etiquetas p
@@ -231,10 +231,10 @@ Guarda el JSON actualizado en la misma ruta.
 
 ### C.4 - Presentar resumen
 
-  HU publicada en Azure DevOps
-  Work Item ID: {ID_AZURE_DEVOPS}
-  Proyecto: AZURE_DEVOPS_PROJECT
-  JSON actualizado: archivos/HUs/{ID_LOCAL}/{ID_LOCAL}-final.json
+HU publicada en Azure DevOps
+Work Item ID: {ID_AZURE_DEVOPS}
+Proyecto: AZURE_DEVOPS_PROJECT
+JSON actualizado: archivos/HUs/{ID_LOCAL}/{ID_LOCAL}-final.json
 
 ---
 
@@ -337,11 +337,11 @@ Agrega o actualiza los campos del test plan en `archivos/HUs/{HU_ID}/{HU_ID}-fin
 
 ### D.5 - Presentar resumen
 
-  HU vinculada al Test Plan
-  Plan: {plan_nombre} (ID: {plan_id})
-  Suite creada: HU-{azure_devops_id} - {story_title} (ID: {suite_id})
-  URL: AZURE_DEVOPS_ORG_URL AZURE_DEVOPS_PROJECT/_testPlans/execute?planId={plan_id}&suiteId={suite_id}
-  JSON actualizado: archivos/HUs/{HU_ID}/{HU_ID}-final.json
+HU vinculada al Test Plan
+Plan: {plan_nombre} (ID: {plan_id})
+Suite creada: HU-{azure_devops_id} - {story_title} (ID: {suite_id})
+URL: AZURE_DEVOPS_ORG_URL AZURE_DEVOPS_PROJECT/\_testPlans/execute?planId={plan_id}&suiteId={suite_id}
+JSON actualizado: archivos/HUs/{HU_ID}/{HU_ID}-final.json
 
 ---
 

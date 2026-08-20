@@ -1,5 +1,8 @@
 // DTOs del endpoint POST /api/sap/logisticsCenter
-// Fuente: (Swagger) YALM-Create-Logistic-CenterV1.yaml + Documentación Api TerpelPosSAP.docx
+// Fuente: Colección Postman oficial "Servicios Integración SAP" + Documentación Api TerpelPosSAP.docx
+// Nota: 'format' es opcional — el payload oficial de Postman no lo envía — y
+// 'logisticCenterType' no está restringido al catálogo DEUNA/EDS/KCO/TDC documentado
+// en la HU 25062 (la colección oficial usa valores como 'EDSPRO').
 
 export interface CreateLogisticsCenterRequest {
   logisticCenter:     string;
@@ -13,7 +16,7 @@ export interface CreateLogisticsCenterRequest {
   profitCenter:       string;
   city:               string;
   edscod:             string;
-  format:             string;
+  format?:            string;
   status:             string;
   modificationDate:   string; // formato: YYYY-MM-DD
   modificationHour:   string; // formato: HH:MM:SS

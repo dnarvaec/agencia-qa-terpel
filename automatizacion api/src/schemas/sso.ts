@@ -1,5 +1,6 @@
 // DTOs del endpoint POST /api/v1/authentication/generate-token
-// Token válido por 300 segundos (~5 minutos). Siempre retorna Bearer token.
+// Token válido por ~30 segundos: debe generarse de forma dinámica justo antes
+// de cada test/petición autenticada (ver src/fixtures/api.fixture.ts).
 
 export interface GenerateTokenRequest {
   public_key: string;

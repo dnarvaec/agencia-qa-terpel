@@ -1,40 +1,37 @@
 {
   "valid": {
-    "product":            "MAT-001",
-    "productDescription": "Gasolina Corriente 87 Octanos",
-    "baseUnit":           "LT",
-    "salesUnit":          "LT",
-    "conversionFactor":   "1",
-    "productType":        "COMBUSTIBLE",
-    "volume":             "1000",
-    "productLine":        "COMBUSTIBLES",
-    "productGroup":       "GASOLINAS",
-    "codigoIvaVentas":    "IVA19",
-    "codigoIvaCompras":   "IVA19",
-    "status":             "A",
-    "modificationDate":   "2025-01-15",
-    "modificationHour":   "10:30:00"
+    "product":                "000000000000002342",
+    "productDescription":     "BIOACEM B50",
+    "baseUnit":               "UG6",
+    "productType":            "FERT",
+    "productHierarchy":       "001070000300000001",
+    "productLine":            "04",
+    "productGroup":           "M001",
+    "salesTAXClassification": "A",
+    "salesVATValue":          "19",
+    "status":                 "1",
+    "modificationDate":       "2023-09-20",
+    "modificationHour":       "09:33:00"
   },
   "update": {
-    "product":            "MAT-001",
-    "productDescription": "Gasolina Corriente 87 Octanos - Actualizado",
-    "status":             "A",
-    "modificationDate":   "2025-02-01",
+    "product":            "000000000000002342",
+    "productDescription": "BIOACEM B50 - Actualizado",
+    "status":             "1",
+    "modificationDate":   "2023-09-21",
     "modificationHour":   "11:00:00"
   },
   "missingProduct": {
-    "productDescription": "Producto sin código SAP",
-    "baseUnit":           "LT",
-    "salesUnit":          "LT",
-    "conversionFactor":   "1",
-    "productType":        "COMBUSTIBLE",
-    "volume":             "500",
-    "productLine":        "COMBUSTIBLES",
-    "productGroup":       "GASOLINAS",
-    "codigoIvaVentas":    "IVA19",
-    "codigoIvaCompras":   "IVA19",
-    "status":             "A",
-    "modificationDate":   "2025-01-15",
-    "modificationHour":   "10:30:00"
+    "productDescription":     "Producto sin código SAP",
+    "baseUnit":               "UG6",
+    "productType":            "FERT",
+    "productHierarchy":       "001070000300000001",
+    "productLine":            "04",
+    "productGroup":           "M001",
+    "salesTAXClassification": "A",
+    "salesVATValue":          "19",
+    "status":                 "1",
+    "modificationDate":       "2023-09-20",
+    "modificationHour":       "09:33:00"
   }
 }
+

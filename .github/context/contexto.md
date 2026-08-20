@@ -2,7 +2,7 @@
 
 > Este archivo contiene toda la información específica del cliente y la aplicación bajo prueba.
 > **Para migrar la agencia a un nuevo cliente**, modifica únicamente este archivo.
-> Los 4 agentes leen este archivo en bootstrap para obtener el contexto necesario.
+> Los agentes leen este archivo en bootstrap para obtener el contexto necesario.
 
 ---
 
@@ -12,31 +12,36 @@
 |---|---|
 | **Nombre del proyecto** | POC Terpel |
 | **Cliente** | Terpel S.A. |
-| **Alcance** | API REST — TerpelPosSAP |
+| **Alcance** | API REST — TerpelPosSAP (Servicios Integración SAP) |
 | **Tipo de pruebas** | API (sin alcance web en esta POC) |
 
 ---
 
 ## Aplicación Bajo Prueba (AUT)
 
-| Entorno | API TerpelPosSAP | SSO |
-|---|---|---|
-| **QAS (Pruebas)** | `https://qas.terpel.sclbox.com:18001` | `https://qas.terpel.sclbox.com:7006` |
-| **Producción** | `https://nodos-terpelpos-gtic-apimanager-prd-apicast.devitech.group:18001` | `https://nodos-terpelpos-gtic-apimanager-prd-apicast.devitech.group:7006` |
+La API usa **dos hosts distintos** según el recurso, más un host dedicado para el SSO:
 
-> El entorno activo se configura en `.env` como `API_URL` y `SSO_URL`.
+| Host | URL | Recursos |
+|---|---|---|
+| **SAP** (TG/QAS) | `https://serviciostg.terpelpos.com:7003` | logisticsCenter, remissionSap |
+| **WS/fullcopy** (QAS) | `https://ws.fullcopy.terpel.sclbox.com:18001` | vendors, product, customer |
+| **SSO** (TG/QAS) | `https://serviciostg.terpelpos.com:7006` | generate-token |
+
+> Los entornos activos se configuran en `.env` como `SAP_API_URL`, `WS_API_URL` y `SSO_URL`.
+
+---
 
 ### Autenticación — SSO (Single Sign-On)
 
-**Flujo obligatorio antes de consumir cualquier endpoint protegido**:
+**Flujo obligatorio antes de consumir cualquier endpoint protegido:**
 
 1. `POST {SSO_URL}/api/v1/authentication/generate-token`
    - Body: `{ "public_key": "<valor del .env API_PUBLIC_KEY>" }`
    - Response 200: `{ "status": number, "message": string, "token": string }`
-   - El token tiene validez de **300 segundos (5 minutos)**
+   - **El token vence a los ~30 segundos**: se debe generar un token nuevo antes de cada test o petición autenticada. **Nunca reutilizar tokens entre tests.**
 2. Usar el token en el header: `Authorization: Bearer <token>`
 
-**Errores SSO**:
+**Errores SSO:**
 
 | HTTP | Estructura |
 |---|---|
@@ -47,29 +52,31 @@
 
 ## Módulos de la Aplicación
 
-### Módulo 1: Centros Logísticos — `POST /api/sap/logisticsCenter`
+### Módulo 1: Centros Logísticos — `POST /api/sap/logisticsCenter` — Host: SAP
 
-**Campos del Body**:
+**Fuente de verdad:** Colección Postman oficial "Servicios Integración SAP"
 
-| Campo | Tipo | Longitud | Obligatorio | Valores permitidos |
-|---|---|---|---|---|
-| `logisticCenter` | string | 4 | Sí | Código SAP (ej. `"1OV3"`) |
-| `logisticName` | string | 35 | Sí | Nombre del centro |
-| `logisticCenterType` | string | 15 | Sí | `DEUNA`, `EDS`, `KCO`, `TDC` |
-| `regional` | string | 35 | Sí | Regional (ej. `"NORTE"`) |
-| `companyCode` | string | 4 | Sí | Sociedad SAP (ej. `"1000"`) |
-| `customer` | string | 10 | Sí | Cliente |
-| `cashBook` | string | 10 | Sí | Libro de caja |
-| `costCenter` | string | 10 | Sí | Centro de costos SAP |
-| `profitCenter` | string | 10 | Sí | Centro de beneficio SAP |
-| `city` | string | 35 | Sí | Ciudad |
-| `edscod` | string | 10 | Sí | Código único EDS |
-| `format` | string | 15 | Sí | `Propia`, `Afiliada`, `Franquicia`, `Masser` (no puede estar vacío) |
-| `status` | string | 1 | Sí | Estado (ej. `"A"`) |
-| `modificationDate` | string | 8 | Sí | `YYYY-MM-DD` |
-| `modificationHour` | string | 6 | Sí | `HH:MM:SS` |
+**Campos del Body:**
 
-**Respuestas**:
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `logisticCenter` | string | Sí | Código SAP del centro (ej. `"1O1W"`) — identificador único, no se puede cambiar salvo retoma |
+| `logisticName` | string | Sí | Nombre del centro (ej. `"EDS LA 40"`) |
+| `logisticCenterType` | string | Sí | Tipo de centro (ej. `"EDSPRO"`) — sin enum restringido en la colección real |
+| `regional` | string | Sí | Código de regional (ej. `"170"`) |
+| `companyCode` | string | Sí | Código de sociedad SAP (ej. `"1800"`) |
+| `customer` | string | Sí | Código de cliente (ej. `"0000010476"`) |
+| `cashBook` | string | Sí | Libro de caja (ej. `"0476"`) |
+| `costCenter` | string | Sí | Centro de costos SAP (ej. `"1824CP001"`) |
+| `profitCenter` | string | Sí | Centro de beneficio SAP (ej. `"1827PP033"`) |
+| `city` | string | Sí | Ciudad (ej. `"IBAGUE"`) — el sistema asigna país y departamento automáticamente |
+| `edscod` | string | Sí | Código único EDS (ej. `"EDS9938"`) |
+| `format` | string | **No** | Tipo de estación (ej. `"ESTACION"`) — opcional; la colección oficial no lo envía |
+| `status` | string | Sí | Estado (ej. `"1"`) |
+| `modificationDate` | string | Sí | `YYYY-MM-DD` |
+| `modificationHour` | string | Sí | `HH:MM:SS` |
+
+**Respuestas:**
 
 | HTTP | Estructura |
 |---|---|
@@ -77,52 +84,119 @@
 | `400` | `{ code: "INVALID_BODY_CONTENT", message: string[], status: 400 }` |
 | `401` | `{ tipoError: "NOT_PAUTHORIZED", code: "AUTHENTICATION_ERROR", message: "DOES NOT HAVE PERMISSIONS", status: 401 }` |
 
+**Reglas de negocio (HU 25062):**
+- País y departamento se asignan automáticamente según la ciudad recibida.
+- Dirección, correo y teléfono se crean vacíos (se rellenan manualmente después).
+- `logisticCenter` es el identificador único; no se puede modificar, salvo retoma MASSER → Franquicia.
+- Se crea una cola en el datalake MDM por cada EDS (trazabilidad).
+
 ---
 
-### Módulo 2: Proveedores — `POST /api/sap/vendors`
+### Módulo 2: Proveedores — `POST /api/sap/vendors/` — Host: WS
 
 Mismo endpoint para **crear** y **modificar**. En modificación, solo `vendor` es obligatorio.
 
-**Campos del Body**:
-
-| Campo | Tipo | Longitud | Obligatorio (crear) | Descripción |
-|---|---|---|---|---|
-| `vendor` | string | — | Sí | Código SAP Proveedor |
-| `vendorNit` | string | — | Sí | NIT del proveedor |
-| `vendorName` | string | 15 | Sí | Razón social |
-| `vendorComercialName` | string | 35 | Sí | Nombre comercial |
-| `status` | string | 1 | Sí | Estado |
-| `modificationDate` | string | 8 | Sí | `YYYY-MM-DD` |
-| `modificationHour` | string | 6 | Sí | `HH:MM:SS` |
-
-**Respuestas**: `{ status: number, message: string, data: object }` (200 / 400 / 401)
-
----
-
-### Módulo 3: Productos — `POST /api/sap/products`
-
-Mismo endpoint para **crear** y **modificar**. En modificación, solo `product` es obligatorio.
-
-**Campos del Body**:
+**Campos del Body:**
 
 | Campo | Tipo | Obligatorio (crear) | Descripción |
 |---|---|---|---|
-| `product` | string | Sí | Código producto SAP |
-| `productDescription` | string | Sí | Descripción del producto |
-| `baseUnit` | string | Sí | Unidad de medida base (ej. `"LT"`) |
-| `salesUnit` | string | Sí | Unidad de medida de venta |
-| `conversionFactor` | string | Sí | Factor de conversión |
-| `productType` | string | Sí | Tipo de producto |
-| `volume` | string | Sí | Volumen |
-| `productLine` | string | Sí | Línea del producto |
-| `productGroup` | string | Sí | Grupo del producto |
-| `codigoIvaVentas` | string | Sí | Código IVA ventas |
-| `codigoIvaCompras` | string | Sí | Código IVA compras |
-| `status` | string (1) | Sí | Estado |
+| `vendor` | string | Sí | Código SAP Proveedor (ej. `"000895"`) |
+| `vendorNit` | string | Sí | NIT del proveedor (ej. `"10417455"`) |
+| `vendorName` | string | Sí | Razón social (máx. 15 chars, ej. `"ELECTRONICOS SAS"`) |
+| `vendorComercialName` | string | Sí | Nombre comercial (máx. 35 chars, ej. `"DEV"`) |
+| `status` | string | Sí | Estado (ej. `"1"`) |
 | `modificationDate` | string | Sí | `YYYY-MM-DD` |
 | `modificationHour` | string | Sí | `HH:MM:SS` |
 
-**Respuestas**: `{ status: number, message: string, data: object }` (200 / 400 / 401)
+**Respuestas:** `{ status: number, message: string, data: object }` (200 / 400 / 401)
+
+---
+
+### Módulo 3: Productos — `POST /api/sap/product` — Host: WS
+
+> ⚠️ El endpoint es **`/api/sap/product`** (singular), no `products`.
+
+Mismo endpoint para **crear** y **modificar**. En modificación, solo `product` es obligatorio.
+
+**Campos del Body:**
+
+| Campo | Tipo | Obligatorio (crear) | Descripción |
+|---|---|---|---|
+| `product` | string | Sí | Código producto SAP (ej. `"000000000000002342"`) |
+| `productDescription` | string | Sí | Descripción (ej. `"BIOACEM B50"`) |
+| `baseUnit` | string | Sí | Unidad de medida base (ej. `"UG6"`) |
+| `productType` | string | Sí | Tipo de producto (ej. `"FERT"`, `"ZTER"`, `"DIEN"`, `"HAWA"`) |
+| `productHierarchy` | string | Sí | Jerarquía SAP (ej. `"001070000300000001"`) |
+| `productLine` | string | Sí | Línea del producto (ej. `"04"`) |
+| `productGroup` | string | Sí | Grupo del producto (ej. `"M001"`) |
+| `salesTAXClassification` | string | Sí | Clasificación IVA ventas (ej. `"A"`) |
+| `salesVATValue` | string | Sí | Valor IVA ventas (ej. `"19"`) |
+| `status` | string | Sí | Estado (ej. `"1"`) |
+| `modificationDate` | string | Sí | `YYYY-MM-DD` |
+| `modificationHour` | string | Sí | `HH:MM:SS` |
+| `salesUnit` | string | No | Unidad de medida de venta |
+| `conversionFactor` | number | No | Factor de conversión |
+| `volume` | number | No | Volumen |
+| `purchaseTAXClassification` | string | No | Clasificación IVA compras |
+| `purchaseVATValue` | string | No | Valor IVA compras |
+
+**Respuestas:** `{ status: number, message: string, data: object }` (200 / 400 / 401)
+
+---
+
+### Módulo 4: Clientes — `POST /api/sap/customer` — Host: WS
+
+**Campos del Body:**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `customerCode` | string | Sí | Código cliente SAP (ej. `"0010261681"`) |
+| `idNumber` | string | Sí | Número de identificación (ej. `"9002225127"`) |
+| `idTypeCode` | string | Sí | Código tipo ID (ej. `"31"`) |
+| `businessName` | string | Sí | Razón social (ej. `"SEPTICLEAN SAS ESP"`) |
+| `telephoneNumber` | string | Sí | Teléfono |
+| `email` | string | Sí | Correo electrónico |
+| `customerType` | string | Sí | Tipo (ej. `"Credito"`) |
+| `status` | string | Sí | Estado (ej. `"Activo"`) |
+| `companyCode` | string | Sí | Código de sociedad SAP |
+| `salesOffice` | string | Sí | Oficina de ventas |
+| `cityCode` | string | Sí | Código de ciudad |
+| `countryCode` | string | Sí | Código de país (ej. `"CO"`) |
+| `departmentCode` | string | Sí | Código de departamento |
+| `modificationDate` | string | Sí | `YYYY-MM-DD` |
+| `modificationHour` | string | Sí | `HH:MM:SS` |
+
+**Respuestas:** `{ status: number, message: string, data: object }` (200 / 400 / 401)
+
+---
+
+### Módulo 5: Remisiones — `POST /api/sap/remissionSap` — Host: SAP
+
+**Campos del Body:**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `delivery` | string | Sí | Número de entrega SAP (ej. `"1483115903"`) |
+| `documentDate` | string | Sí | `YYYY-MM-DD` |
+| `wayBill` | string | Sí | Guía/albarán de transporte |
+| `logisticCenter` | string | Sí | Centro logístico origen |
+| `supplyingCenter` | string | Sí | Centro logístico abastecedor |
+| `productList` | array | Sí | Lista de productos (ver estructura abajo) |
+| `frontierLaw` | string | Sí | Ley de frontera |
+| `status` | string | Sí | Estado |
+| `modificationDate` | string | Sí | `YYYY-MM-DD` |
+| `modificationHour` | string | Sí | `HH:MM:SS` |
+
+**Estructura de cada ítem en `productList`:**
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `product` | string | Código producto SAP |
+| `quantity` | number | Cantidad |
+| `unit` | string | Unidad de medida |
+| `salesCostValue` | string | Valor costo de venta |
+
+**Respuestas:** `{ status: number, message: string, data: object }` (200 / 400 / 401)
 
 ---
 
@@ -134,25 +208,31 @@ automatizacion api/
 │   ├── apis/
 │   │   ├── BaseApi.ts              ← Clase base HTTP (get/post/put/patch/delete)
 │   │   ├── SsoApi.ts               ← POST /api/v1/authentication/generate-token
-│   │   ├── LogisticsCenterApi.ts   ← POST /api/sap/logisticsCenter
-│   │   ├── VendorsApi.ts           ← POST /api/sap/vendors (crear / modificar)
-│   │   └── ProductsApi.ts          ← POST /api/sap/products (crear / modificar)
+│   │   ├── LogisticsCenterApi.ts   ← POST /api/sap/logisticsCenter  (host SAP)
+│   │   ├── VendorsApi.ts           ← POST /api/sap/vendors/          (host WS)
+│   │   ├── ProductsApi.ts          ← POST /api/sap/product           (host WS)
+│   │   ├── CustomerApi.ts          ← POST /api/sap/customer          (host WS)
+│   │   └── RemissionApi.ts         ← POST /api/sap/remissionSap      (host SAP)
 │   ├── schemas/
-│   │   ├── sso.ts                  ← DTOs SSO (GenerateTokenRequest/Response, errores)
+│   │   ├── sso.ts                  ← DTOs SSO
 │   │   ├── logisticsCenter.ts      ← DTOs Centros Logísticos
 │   │   ├── vendors.ts              ← DTOs Proveedores
-│   │   └── products.ts             ← DTOs Productos
+│   │   ├── products.ts             ← DTOs Productos
+│   │   ├── customer.ts             ← DTOs Clientes
+│   │   └── remission.ts            ← DTOs Remisiones
 │   ├── fixtures/
-│   │   └── api.fixture.ts          ← apiContext | authenticatedContext | ssoAuthenticatedContext
+│   │   └── api.fixture.ts          ← Fixtures de Playwright con token SSO dinámico
 │   └── utils/
-│       ├── env.ts                  ← API_URL, SSO_URL, API_PUBLIC_KEY, API_TOKEN
+│       ├── env.ts                  ← SAP_API_URL, WS_API_URL, SSO_URL, API_PUBLIC_KEY
 │       ├── DataLoader.ts           ← Carga archivos JSON de data/
 │       └── ResponseValidator.ts    ← Aserciones reutilizables
 ├── data/
 │   ├── sso.json                    ← Payloads SSO (valid, emptyKey, invalidKey)
 │   ├── logisticsCenter.json        ← Payloads Centros Logísticos
 │   ├── vendors.json                ← Payloads Proveedores
-│   └── products.json               ← Payloads Productos
+│   ├── products.json               ← Payloads Productos
+│   ├── customer.json               ← Payloads Clientes
+│   └── remission.json              ← Payloads Remisiones
 └── tests/
     └── {recurso}/                  ← Specs generados por el agente "Automatizar y Ejecutar"
 ```
@@ -164,146 +244,125 @@ automatizacion api/
 - `@utils/*` → `src/utils/*`
 - `@data/*` → `data/*`
 
-**Fixtures disponibles**:
-- `apiContext` → sin autenticación (para probar 401)
-- `authenticatedContext` → Bearer token estático desde `API_TOKEN` del .env
-- `ssoAuthenticatedContext` → genera token automáticamente via SSO con `API_PUBLIC_KEY`
+---
 
-**Patrón de test obligatorio**:
+## Fixtures Disponibles (`api.fixture.ts`)
+
+Todos los fixtures se importan desde `@fixtures/api.fixture` (nunca de `@playwright/test` directamente).
+
+| Fixture | Descripción |
+|---|---|
+| `apiContext` | `APIRequestContext` sin autenticación — para casos negativos (401) |
+| `ssoApi` | Instancia de `SsoApi` para llamar al endpoint de token directamente |
+| `authenticatedContext` | `APIRequestContext` con token Bearer generado dinámicamente vía SSO (token nuevo por test) |
+| `logisticsCenterApi` | `LogisticsCenterApi` con token — host SAP |
+| `logisticsCenterApiNoAuth` | `LogisticsCenterApi` sin token — para casos 401 |
+| `vendorsApi` | `VendorsApi` con token — host WS |
+| `vendorsApiNoAuth` | `VendorsApi` sin token |
+| `productsApi` | `ProductsApi` con token — host WS |
+| `productsApiNoAuth` | `ProductsApi` sin token |
+| `customerApi` | `CustomerApi` con token — host WS |
+| `customerApiNoAuth` | `CustomerApi` sin token |
+| `remissionApi` | `RemissionApi` con token — host SAP |
+| `remissionApiNoAuth` | `RemissionApi` sin token |
+
+> El token SSO se genera automáticamente en cada test que use un fixture autenticado. Dado que el token vence a ~30 segundos, el fixture garantiza un token fresco por cada resolución.
+
+---
+
+## Patrón de Test Obligatorio
+
 ```typescript
 import { test, expect } from '@fixtures/api.fixture';
-import { LogisticsCenterApi } from '@apis/LogisticsCenterApi';
 import { DataLoader } from '@utils/DataLoader';
 import { ResponseValidator } from '@utils/ResponseValidator';
-import { env } from '@utils/env';
-import type { CreateLogisticsCenterRequest, CreateLogisticsCenterResponse } from '@schemas/logisticsCenter';
+import type { CreateLogisticsCenterRequest } from '@schemas/logisticsCenter';
 
 const data = DataLoader.load<{ valid: CreateLogisticsCenterRequest }>('logisticsCenter.json');
 
 test.describe('POST /api/sap/logisticsCenter', () => {
-  test('descripción del caso', async ({ ssoAuthenticatedContext }) => {
-    const api = new LogisticsCenterApi(ssoAuthenticatedContext, env.apiUrl);
-    const response = await api.create(data.valid);
-    await ResponseValidator.expectStatus(response, 200);
+  test('Crear centro logístico con datos válidos → HTTP 200', async ({ logisticsCenterApi }) => {
+    const response = await logisticsCenterApi.create(data.valid);
+    const body = await ResponseValidator.expectOk(response);
+    expect(body.data.logistic_center).toBe(data.valid.logisticCenter);
+  });
+
+  test('Sin token Bearer → HTTP 401', async ({ logisticsCenterApiNoAuth }) => {
+    const response = await logisticsCenterApiNoAuth.create(data.valid);
+    await ResponseValidator.expectUnauthorized(response);
   });
 });
 ```
 
 ---
 
-## Credenciales de Prueba
+## Reglas de Negocio Clave
 
-| Variable | Descripción |
-|---|---|
-| `API_TOKEN` | Bearer token para autenticación (definido en `.env`) |
-
-> Los casos de autenticación negativa usan `apiContext` (sin token) en lugar de `authenticatedContext`.
+- El token SSO vence a ~30 segundos: **nunca reutilizar entre tests** — el fixture `authenticatedContext` genera uno nuevo por test.
+- Requests sin `Authorization` → HTTP 401.
+- `public_key` vacía en SSO → HTTP 400 `INVALID_BODY_CONTENT`.
+- `logisticCenter` es identificador único; no se puede modificar, salvo retoma MASSER → Franquicia.
+- El campo `format` en Centros Logísticos es opcional; si se envía vacío puede provocar HTTP 400.
+- `city` en Centros Logísticos determina el país y departamento asignados automáticamente por el sistema.
+- Productos: endpoint es `/api/sap/product` (singular); no confundir con `products`.
+- Vendors: endpoint incluye trailing slash `/api/sap/vendors/`.
+- Todas las respuestas de error siguen la estructura: `{ status, code, message }`.
 
 ---
 
 ## Comandos de Ejecución (para el agente "Automatizar y Ejecutar")
 
-> El agente usa `workspace__executeCommand` para compilar y ejecutar tests. Los comandos se corren siempre desde la raíz del workspace (cwd = ".") salvo que se indique lo contrario.
+> Los comandos se corren siempre desde la raíz del workspace.
 
-### Suite API (alcance de esta POC)
+### Suite API
 
 | Propósito | Comando |
 |---|---|
 | **Verificar TypeScript** (antes de ejecutar) | `npx tsc --noEmit --project "automatizacion api/tsconfig.json"` |
 | **Ejecutar toda la suite API** | `npm run test:api` |
-| **Ejecutar un spec específico** | `npx playwright test "automatizacion api/tests/logistics-center/logisticsCenter.spec.ts" --config "automatizacion api/playwright.config.ts"` |
-| **Ejecutar por patrón de nombre** | `npm run test:api -- --grep "Crear Centro Logístico"` |
-| **Leer resultados JSON** (post-ejecución) | `workspace__readFile` → `automatizacion api/reports/results.json` |
+| **Ejecutar un spec específico** | `npx playwright test "automatizacion api/tests/{recurso}/{spec}.spec.ts" --config "automatizacion api/playwright.config.ts"` |
+| **Ejecutar por nombre** | `npm run test:api -- --grep "descripción"` |
+| **Ver reporte HTML** | `npm run test:api:report` |
+| **Leer resultados JSON** | `workspace__readFile` → `automatizacion api/reports/results.json` |
 
 ### Flujo obligatorio del agente para API
 
 ```
-1. workspace__readFile(".github/context/contexto.md")          ← bootstrap
-2. workspace__readFile("archivos/Casos de Prueba/{ID}/{ID}-test-cases.json")  ← casos
-3. workspace__listDirectory("automatizacion api/src/apis/")    ← API objects disponibles
-4. workspace__readFile("automatizacion api/src/schemas/logisticsCenter.ts")   ← tipos
-5. workspace__writeFile("automatizacion api/tests/{recurso}/{recurso}.spec.ts", ...)  ← generar test
-6. workspace__executeCommand("npx tsc --noEmit --project \"automatizacion api/tsconfig.json\"")  ← compilar
-7. workspace__executeCommand("npm run test:api")                ← ejecutar
-8. workspace__readFile("automatizacion api/reports/results.json")  ← leer resultados
-9. Si hay fallos → corregir spec → volver a paso 6 (máx. 5 iteraciones)
+1. workspace__readFile(".github/context/contexto.md")                              ← bootstrap
+2. workspace__readFile("archivos/Casos de Prueba/{ID}/{ID}-test-cases.json")       ← casos
+3. workspace__listDirectory("automatizacion api/src/apis/")                        ← API objects
+4. workspace__readFile("automatizacion api/src/schemas/{recurso}.ts")              ← tipos
+5. workspace__readFile("automatizacion api/data/{recurso}.json")                   ← datos de prueba
+6. workspace__writeFile("automatizacion api/tests/{recurso}/{recurso}.spec.ts", …) ← generar spec
+7. workspace__executeCommand("npx tsc --noEmit --project \"automatizacion api/tsconfig.json\"")
+8. workspace__executeCommand("npm run test:api")
+9. workspace__readFile("automatizacion api/reports/results.json")                  ← leer resultados
+10. Si hay fallos → corregir spec → volver al paso 7 (máx. 5 iteraciones)
 ```
 
 ### Interpretación de resultados JSON
 
-El archivo `automatizacion api/reports/results.json` tiene esta estructura:
 ```json
 {
   "stats": { "expected": N, "unexpected": M, "flaky": 0 },
-  "suites": [{ "specs": [{ "title": "...", "ok": true/false, "tests": [...] }] }]
+  "suites": [{ "specs": [{ "title": "...", "ok": true, "tests": [...] }] }]
 }
 ```
-- `stats.unexpected > 0` → hay fallos que corregir
-- `stats.expected === total` → todos los tests pasaron → entrega completada
-- Para ver el detalle de un fallo: `suites[*].specs[*].tests[*].errors[*].message`
-
-### Suite Web (fuera de alcance en la POC actual — documentado para uso futuro)
-
-| Propósito | Comando |
-|---|---|
-| **Verificar TypeScript** | `npx tsc --noEmit --project "automatizacion web/tsconfig.json"` |
-| **Ejecutar toda la suite Web** | `npm run test:web` |
-| **Ejecutar con navegador visible** | `npm run test:web:headed` |
-| **Ejecutar un spec específico** | `npx playwright test "automatizacion web/tests/{feature}/{spec}.spec.ts" --config "automatizacion web/playwright.config.ts"` |
-| **Leer resultados JSON** (post-ejecución) | `workspace__readFile` → `automatizacion web/reports/results.json` |
-
-### Flujo obligatorio del agente para Web
-
-```
-1. workspace__readFile(".github/context/contexto.md")                        ← bootstrap
-2. workspace__readFile("archivos/Casos de Prueba/{ID}/{ID}-test-cases.json") ← casos
-3. playwright__browser_navigate(APP_URL)                                     ← exploración en vivo
-4. playwright__browser_snapshot()                                            ← capturar árbol de accesibilidad
-5. [ciclo exploración: navigate → snapshot → interact → snapshot]
-6. workspace__writeFile("automatizacion web/src/pages/{Page}.ts", ...)       ← Page Object
-7. workspace__writeFile("automatizacion web/src/fixtures/page.fixture.ts", ...)  ← completar fixture con login real
-8. workspace__writeFile("automatizacion web/tests/{feature}/{spec}.spec.ts", ...)
-9. workspace__executeCommand("npx tsc --noEmit --project \"automatizacion web/tsconfig.json\"")
-10. workspace__executeCommand("npm run test:web")
-11. workspace__readFile("automatizacion web/reports/results.json")
-12. Si hay fallos → corregir → volver al paso 9 (máx. 5 iteraciones)
-```
-
-### Estructura de fixtures Web
-
-```typescript
-// Siempre importar desde @fixtures/page.fixture, NUNCA de @playwright/test directamente
-import { test, expect } from '@fixtures/page.fixture';
-
-test('caso de prueba', async ({ authenticatedPage }) => {
-  // authenticatedPage ya está en APP_URL autenticado
-});
-```
-
-**Credenciales web**: `env.defaultUser` / `env.defaultPassword` (desde `.env`)
+- `stats.unexpected > 0` → hay fallos que corregir.
+- `stats.expected === total` → todos pasaron → entrega completada.
+- Detalle de fallos: `suites[*].specs[*].tests[*].errors[*].message`.
 
 ---
 
-- El campo `format` en Centros Logísticos no puede estar vacío → HTTP 400 `INVALID_BODY_CONTENT`
-- El campo `public_key` en SSO no puede estar vacío → HTTP 400 `INVALID_BODY_CONTENT`
-- Requests sin header `Authorization` → HTTP 401
-- Token SSO expira en 300 segundos; usar `ssoAuthenticatedContext` para renovarlo automáticamente
-- Los valores permitidos de `logisticCenterType`: `DEUNA`, `EDS`, `KCO`, `TDC`
-- Los valores permitidos de `format`: `Propia`, `Afiliada`, `Franquicia`, `Masser`
-- La respuesta exitosa de Centros Logísticos retorna `empresaId` (número) y `logistic_center` (código)
-- Todas las respuestas de error siguen la estructura: `{ status, code, message }`
-
----
-
-## Variables de Entorno Requeridas (Definidas en .env)
+## Variables de Entorno Requeridas (definidas en `.env`)
 
 | Variable | Descripción |
 |---|---|
+| `SAP_API_URL` | URL host SAP (ej. `https://serviciostg.terpelpos.com:7003`) |
+| `WS_API_URL` | URL host WS (ej. `https://ws.fullcopy.terpel.sclbox.com:18001`) |
+| `SSO_URL` | URL host SSO (ej. `https://serviciostg.terpelpos.com:7006`) |
+| `API_PUBLIC_KEY` | Public key para generar tokens SSO — vigencia ~30s, regenerar por test |
 | `AZURE_DEVOPS_ORG_URL` | URL de la organización Azure DevOps |
 | `AZURE_DEVOPS_PROJECT` | Nombre del proyecto Azure DevOps |
 | `AZURE_DEVOPS_PAT` | Token de acceso personal Azure DevOps |
-| `API_URL` | URL base de la API TerpelPosSAP (ej. `https://qas.terpel.sclbox.com:18001`) |
-| `SSO_URL` | URL base del SSO (ej. `https://qas.terpel.sclbox.com:7006`) |
-| `API_PUBLIC_KEY` | Public key suministrada por TerpelPos para generar tokens |
-| `API_TOKEN` | Bearer token estático (alternativa a SSO, útil en CI) |
-| `AGENT_UI_PORT` | Puerto del servidor local Express (3000) |
+| `AGENT_UI_PORT` | Puerto del servidor local Express (por defecto `3000`) |

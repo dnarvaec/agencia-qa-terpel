@@ -15,6 +15,22 @@
 			],
 			"type": "stdio"
 		},
+		"jira": {
+			"command": "node",
+			"args": [
+				"${workspaceFolder}/.vscode/start-jira-mcp.js"
+			],
+			"cwd": "${workspaceFolder}",
+			"type": "stdio"
+		},
+		"qmetry": {
+			"command": "node",
+			"args": [
+				"${workspaceFolder}/.vscode/qmetry-mcp-server.mjs"
+			],
+			"cwd": "${workspaceFolder}",
+			"type": "stdio"
+		},
 	},
 	"inputs": []
 }

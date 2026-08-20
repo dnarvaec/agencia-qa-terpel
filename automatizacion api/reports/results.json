@@ -1,0 +1,78 @@
+{
+  "config": {
+    "configFile": "C:\\Users\\dnarvaec\\OneDrive - NTT DATA EMEAL\\Documents\\Proyectos AUTO\\Terpel\\POC\\agencia-qa-terpel\\automatizacion api\\playwright.config.ts",
+    "rootDir": "C:/Users/dnarvaec/OneDrive - NTT DATA EMEAL/Documents/Proyectos AUTO/Terpel/POC/agencia-qa-terpel/automatizacion api/tests",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/dnarvaec/OneDrive - NTT DATA EMEAL/Documents/Proyectos AUTO/Terpel/POC/agencia-qa-terpel/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "",
+        "name": "",
+        "testDir": "C:/Users/dnarvaec/OneDrive - NTT DATA EMEAL/Documents/Proyectos AUTO/Terpel/POC/agencia-qa-terpel/automatizacion api/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "html",
+        {
+          "outputFolder": "./reports",
+          "open": "never"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "./reports/results.json"
+        }
+      ],
+      [
+        "list",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 2,
+    "webServer": null
+  },
+  "suites": [],
+  "errors": [
+    {
+      "message": "Error: No tests found",
+      "stack": "Error: No tests found"
+    }
+  ],
+  "stats": {
+    "startTime": "2026-08-20T15:38:11.013Z",
+    "duration": 64.96199999999999,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

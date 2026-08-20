@@ -3,10 +3,10 @@ import type { CreateProductRequest, UpdateProductRequest } from '@schemas/produc
 
 export class ProductsApi extends BaseApi {
   async create(payload: CreateProductRequest) {
-    return this.post('/api/sap/products', payload);
+    return this.post('/api/sap/product', payload);
   }
 
   async update(payload: UpdateProductRequest) {
-    return this.post('/api/sap/products', payload);
+    return this.post('/api/sap/product', payload);
   }
 }

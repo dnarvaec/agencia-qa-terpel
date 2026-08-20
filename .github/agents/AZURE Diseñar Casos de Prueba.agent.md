@@ -1,5 +1,5 @@
 ---
-name: Diseñar Casos de Prueba
+name: AZURE Diseñar Casos de Prueba
 description: Responsable de crear Casos de Prueba a partir de Historias de Usuario, asegurando cobertura del 100% de descripcion, criterios de aceptación y trazabilidad completa.
 tools:
   [
@@ -314,7 +314,11 @@ Guarda `suite_id`.
 
 **Paso B3 — Crear Test Cases en el plan**
 
-Para cada caso del JSON, usa `azure-devops/testplan_create_test_case`:
+**CRÍTICO: el patrón es crear(TC-001) → actualizar(TC-001) → crear(TC-002) → actualizar(TC-002) → ... NUNCA crear todos primero.**
+
+Para cada caso del JSON:
+
+**3a.** Llama `azure-devops/testplan_create_test_case` con solo el título:
 
 ```
 project: AZURE_DEVOPS_PROJECT
@@ -323,12 +327,9 @@ suiteId: {suite_id}
 title: "{tc.id} - {tc.title}"
 ```
 
-Luego actualiza los pasos con `azure-devops/testplan_update_test_case_steps`:
+Guarda el `azure_id` devuelto. Luego **inmediatamente** — antes de crear el siguiente caso — llama `azure-devops/wit_update_work_item` para ese `azure_id`:
 
-- `action`: campo `action` de cada paso
-- `expectedResult`: campo `expected_result` de cada paso
-
-Actualiza **todos los campos disponibles** con `azure-devops/wit_update_work_item`:
+**3b.** Llama `azure-devops/wit_update_work_item`:
 
 ```
 id: {azure_id}
@@ -338,12 +339,22 @@ fields:
     <p><b>Descripción:</b> {tc.description}</p>
     <p><b>Objetivo:</b> {tc.objective}</p>
     <p><b>Precondiciones:</b></p>
-    <ul>{cada item de tc.preconditions como <li>}</ul>
+    <ul>{cada item de tc.preconditions como <li>item</li>}</ul>
     <p><b>Post-condición:</b> {tc.post_condition}</p>
     <p><b>Notas de automatización:</b> {tc.automation_notes}</p>
     <p><b>Criterios de aceptación cubiertos:</b> {cada item de tc.acceptance_criteria_covered unido por coma}</p>
     <p><b>Trazabilidad — Criterio:</b> {tc.derivation_trace.quote}</p>
     <p><b>Trazabilidad — Origen:</b> {tc.derivation_trace.observed_in}</p>
+
+  Microsoft.VSTS.TCM.Steps: |
+    <steps id="0" last="{número total de pasos}">
+      {para cada step de tc.steps, IDs DEBEN empezar en 1: NUNCA usar id=0}
+      <step id="{número_del_step_empezando_en_1}" type="ActionStep">
+        <parameterizedString isformatted="false">{step.action} | Datos: {step.data}</parameterizedString>
+        <parameterizedString isformatted="false">{step.expected_result}</parameterizedString>
+        <description/>
+      </step>
+    </steps>
 
   Microsoft.VSTS.Common.Priority: {1 si alta, 2 si media, 3 si baja}
   Microsoft.VSTS.Common.ValueArea: "Business"
@@ -361,7 +372,23 @@ fields:
     <p><b>Observado en:</b> {tc.derivation_trace.observed_in}</p>
 ```
 
-**Nota:** No incluir `System.Tags` — el usuario no tiene permisos para crear tags nuevos. Los valores válidos para `AutomationStatus` son: `"Planned"`, `"Not Automated"`, `"Automated"` (con espacios).
+**Notas importantes sobre el update:**
+
+- **NO incluir `System.Tags`** — el usuario no tiene permisos para crear tags nuevos en este proyecto. Omitir ese campo completamente.
+- Si el update devuelve error en algún campo específico, reintenta el update **omitiendo solo ese campo** y registra en `status: "partial"` qué campos no se pudieron establecer.
+- Los valores válidos para `AutomationStatus` son exactamente: `"Planned"`, `"Not Automated"`, `"Automated"` (con espacios, no camelCase).
+
+**Paso B3c — Vincular Test Cases a la HU ⚠️ OBLIGATORIO**
+
+Vincula cada Test Case a la HU usando `azure-devops/wit_work_items_link`. El `story_id` del JSON **es** el ID del Work Item de la HU en Azure DevOps — ejecutar siempre para cada TC creado, sin excepción:
+
+```
+sourceId: {story_id}
+targetId: {azure_id del TC}
+linkType: "Microsoft.VSTS.Common.TestedBy"
+```
+
+Esto crea el vínculo **"Probado por / Tested By"** visible al abrir la HU en Azure DevOps.
 
 **Paso B4 — Vincular a la suite**
 
