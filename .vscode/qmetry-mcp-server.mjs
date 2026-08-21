@@ -95,7 +95,7 @@ function errorResult(err) {
   return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
 }
 
-const server = new McpServer({ name: "qmetry", version: "1.0.0" });
+const server = new McpServer({ name: "qmetry", version: "2.0.0" });
 
 server.registerTool(
   "get_projects",
@@ -115,7 +115,7 @@ server.registerTool(
 server.registerTool(
   "create_testcase",
   {
-    description: "Crea un Test Case en QMetry dentro de un proyecto (por clave de proyecto Jira) con sus pasos.",
+    description: "Crea un Test Case en QMetry con todos sus campos: pasos, prioridad, tipo, estado, etiquetas, tiempo estimado, asignado y automatización.",
     inputSchema: z.object({
       project_key: z.string().describe("Clave del proyecto Jira con QMetry habilitado, ej. CORREOF"),
       summary: z.string().describe("Título del caso de prueba"),
@@ -131,10 +131,17 @@ server.registerTool(
         )
         .default([])
         .describe("Pasos del caso de prueba en orden"),
-      folder_id: z.number().optional().describe("ID de carpeta de QMetry (ver get_folders/create_folder); si se omite, va a la carpeta raíz"),
+      folder_id: z.number().optional().describe("ID de carpeta (ver get_folders/create_folder); omitir para carpeta raíz"),
+      priority: z.string().optional().describe("Prioridad: 'Highest'|'High'|'Medium'|'Low'|'Lowest'"),
+      labels: z.array(z.string()).optional().describe("Etiquetas de clasificación, ej. ['smoke','regresion']"),
+      test_case_type: z.string().optional().describe("Tipo: 'Manual'|'Automated'|'Automated_Manual'"),
+      status: z.string().optional().describe("Estado del caso, ej. 'Approved'|'Not_Approved'"),
+      estimated_time_minutes: z.number().optional().describe("Tiempo estimado de ejecución en minutos"),
+      automated: z.boolean().optional().describe("true si el caso está automatizado"),
+      assignee: z.string().optional().describe("Username de Jira a quien se asigna el caso"),
     }),
   },
-  async ({ project_key, summary, description, precondition, steps, folder_id }) => {
+  async ({ project_key, summary, description, precondition, steps, folder_id, priority, labels, test_case_type, status, estimated_time_minutes, automated, assignee }) => {
     try {
       const projectId = await resolveProjectId(project_key);
       const body = {
@@ -149,6 +156,13 @@ server.registerTool(
         })),
       };
       if (folder_id !== undefined) body.folderId = folder_id;
+      if (priority !== undefined) body.priority = priority;
+      if (labels !== undefined) body.labels = labels;
+      if (test_case_type !== undefined) body.testCaseType = test_case_type;
+      if (status !== undefined) body.status = status;
+      if (estimated_time_minutes !== undefined) body.estimatedTime = estimated_time_minutes * 60 * 1000;
+      if (automated !== undefined) body.automated = automated;
+      if (assignee !== undefined) body.assignee = assignee;
       return textResult(await qmetryFetch("/testcases", { method: "POST", body: JSON.stringify(body) }));
     } catch (err) {
       return errorResult(err);
@@ -177,21 +191,35 @@ server.registerTool(
 server.registerTool(
   "update_testcase",
   {
-    description: "Actualiza el resumen, descripción o precondición de un Test Case existente en QMetry (no modifica los pasos; para eso vuelve a crear el caso).",
+    description: "Actualiza cualquier campo de un Test Case en QMetry: resumen, descripción, precondición, prioridad, etiquetas, tipo, estado, tiempo estimado, automatización y asignado. Para modificar pasos usa add_steps/update_step/delete_step.",
     inputSchema: z.object({
       testcase_key: z.string().describe("Clave o UID del test case en QMetry"),
       version_no: z.number().describe("Número de versión del test case a actualizar"),
-      summary: z.string().optional().describe("Nuevo título, si cambia"),
-      description: z.string().optional().describe("Nueva descripción, si cambia"),
-      precondition: z.string().optional().describe("Nueva precondición, si cambia"),
+      summary: z.string().optional().describe("Nuevo título"),
+      description: z.string().optional().describe("Nueva descripción funcional"),
+      precondition: z.string().optional().describe("Nueva precondición"),
+      priority: z.string().optional().describe("Prioridad: 'Highest'|'High'|'Medium'|'Low'|'Lowest'"),
+      labels: z.array(z.string()).optional().describe("Nuevas etiquetas (reemplaza las actuales)"),
+      test_case_type: z.string().optional().describe("Tipo: 'Manual'|'Automated'|'Automated_Manual'"),
+      status: z.string().optional().describe("Nuevo estado, ej. 'Approved'|'Not_Approved'"),
+      estimated_time_minutes: z.number().optional().describe("Tiempo estimado en minutos"),
+      automated: z.boolean().optional().describe("true si el caso está automatizado"),
+      assignee: z.string().optional().describe("Username de Jira del asignado"),
     }),
   },
-  async ({ testcase_key, version_no, summary, description, precondition }) => {
+  async ({ testcase_key, version_no, summary, description, precondition, priority, labels, test_case_type, status, estimated_time_minutes, automated, assignee }) => {
     try {
       const body = {};
       if (summary !== undefined) body.summary = summary;
       if (description !== undefined) body.description = description;
       if (precondition !== undefined) body.precondition = precondition;
+      if (priority !== undefined) body.priority = priority;
+      if (labels !== undefined) body.labels = labels;
+      if (test_case_type !== undefined) body.testCaseType = test_case_type;
+      if (status !== undefined) body.status = status;
+      if (estimated_time_minutes !== undefined) body.estimatedTime = estimated_time_minutes * 60 * 1000;
+      if (automated !== undefined) body.automated = automated;
+      if (assignee !== undefined) body.assignee = assignee;
       await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}/versions/${version_no}`, {
         method: "PUT",
         body: JSON.stringify(body),
@@ -401,18 +429,354 @@ server.registerTool(
 server.registerTool(
   "search_testcases",
   {
-    description: "Busca Test Cases de QMetry en un proyecto, opcionalmente filtrando por texto en el resumen.",
+    description: "Busca Test Cases de QMetry con filtros avanzados: texto, carpeta, estado, prioridad, etiquetas y tipo.",
     inputSchema: z.object({
       project_key: z.string().describe("Clave del proyecto Jira con QMetry habilitado"),
-      search_text: z.string().optional().describe("Texto a buscar en el summary del test case"),
+      search_text: z.string().optional().describe("Texto a buscar en el summary"),
+      folder_id: z.number().optional().describe("ID de carpeta para filtrar; omitir para buscar en todas"),
+      status: z.string().optional().describe("Filtrar por estado, ej. 'Approved'|'Not_Approved'"),
+      priority: z.string().optional().describe("Filtrar por prioridad, ej. 'High'|'Medium'|'Low'"),
+      labels: z.array(z.string()).optional().describe("Filtrar por etiquetas"),
+      test_case_type: z.string().optional().describe("Filtrar por tipo: 'Manual'|'Automated'"),
+      max_results: z.number().optional().describe("Número máximo de resultados (default 50)"),
     }),
   },
-  async ({ project_key, search_text }) => {
+  async ({ project_key, search_text, folder_id, status, priority, labels, test_case_type, max_results }) => {
     try {
       const projectId = await resolveProjectId(project_key);
       const filter = { projectId };
       if (search_text) filter.searchText = search_text;
-      return textResult(await qmetryFetch("/testcases/search", { method: "POST", body: JSON.stringify({ filter }) }));
+      if (folder_id !== undefined) filter.folderId = folder_id;
+      if (status) filter.status = status;
+      if (priority) filter.priority = priority;
+      if (labels?.length) filter.labels = labels;
+      if (test_case_type) filter.testCaseType = test_case_type;
+      return textResult(
+        await qmetryFetch("/testcases/search", {
+          method: "POST",
+          body: JSON.stringify({ filter, maxResults: max_results ?? 50 }),
+        }),
+      );
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+// ── Ciclo de vida del Test Case ───────────────────────────────────────────────
+
+server.registerTool(
+  "get_testcase_versions",
+  {
+    description: "Lista todas las versiones de un Test Case en QMetry con su número de versión y estado.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case en QMetry, ej. TP-TC-17"),
+    }),
+  },
+  async ({ testcase_key }) => {
+    try {
+      return textResult(await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}/versions`));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "delete_testcase",
+  {
+    description: "Elimina permanentemente un Test Case de QMetry. Esta acción no se puede deshacer.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case a eliminar"),
+    }),
+  },
+  async ({ testcase_key }) => {
+    try {
+      await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}`, { method: "DELETE" });
+      return textResult({ deleted: true, testcase_key });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "clone_testcase",
+  {
+    description: "Clona un Test Case existente en QMetry, opcionalmente en un proyecto o carpeta destino distintos.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case a clonar"),
+      project_key: z.string().describe("Clave del proyecto destino (puede ser el mismo)"),
+      folder_id: z.number().optional().describe("ID de carpeta destino; omitir para carpeta raíz"),
+    }),
+  },
+  async ({ testcase_key, project_key, folder_id }) => {
+    try {
+      const projectId = await resolveProjectId(project_key);
+      const body = { projectId };
+      if (folder_id !== undefined) body.folderId = folder_id;
+      return textResult(
+        await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}/clone`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+      );
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "move_testcase",
+  {
+    description: "Mueve un Test Case a otra carpeta dentro del mismo proyecto QMetry.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case a mover"),
+      version_no: z.number().describe("Número de versión del test case"),
+      folder_id: z.number().describe("ID de la carpeta destino (ver get_folders)"),
+    }),
+  },
+  async ({ testcase_key, version_no, folder_id }) => {
+    try {
+      await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}/versions/${version_no}`, {
+        method: "PUT",
+        body: JSON.stringify({ folderId: folder_id }),
+      });
+      return textResult({ moved: true, testcase_key, folder_id });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+// ── Pasos (Steps) ─────────────────────────────────────────────────────────────
+
+server.registerTool(
+  "get_testcase_steps",
+  {
+    description: "Obtiene todos los pasos de un Test Case de QMetry, incluyendo sus IDs (necesarios para update_step y delete_step).",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case"),
+      version_no: z.number().describe("Número de versión del test case"),
+    }),
+  },
+  async ({ testcase_key, version_no }) => {
+    try {
+      return textResult(
+        await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}/versions/${version_no}/steps`),
+      );
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "add_steps",
+  {
+    description: "Agrega pasos al final de un Test Case ya existente en QMetry.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case"),
+      version_no: z.number().describe("Número de versión del test case"),
+      steps: z
+        .array(
+          z.object({
+            action: z.string().describe("Acción del paso"),
+            data: z.string().optional().describe("Datos de prueba del paso"),
+            expected_result: z.string().describe("Resultado esperado del paso"),
+          }),
+        )
+        .min(1)
+        .describe("Lista de pasos a agregar"),
+    }),
+  },
+  async ({ testcase_key, version_no, steps }) => {
+    try {
+      return textResult(
+        await qmetryFetch(`/testcases/${encodeURIComponent(testcase_key)}/versions/${version_no}/steps`, {
+          method: "POST",
+          body: JSON.stringify(
+            steps.map((s) => ({
+              stepDetails: s.action,
+              testData: s.data || "",
+              expectedResult: s.expected_result,
+            })),
+          ),
+        }),
+      );
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "update_step",
+  {
+    description: "Actualiza un paso específico de un Test Case en QMetry. El step_id se obtiene con get_testcase_steps.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case"),
+      version_no: z.number().describe("Número de versión del test case"),
+      step_id: z.number().describe("ID numérico del paso (obtenido con get_testcase_steps)"),
+      action: z.string().optional().describe("Nueva acción del paso"),
+      data: z.string().optional().describe("Nuevos datos de prueba"),
+      expected_result: z.string().optional().describe("Nuevo resultado esperado"),
+    }),
+  },
+  async ({ testcase_key, version_no, step_id, action, data, expected_result }) => {
+    try {
+      const body = {};
+      if (action !== undefined) body.stepDetails = action;
+      if (data !== undefined) body.testData = data;
+      if (expected_result !== undefined) body.expectedResult = expected_result;
+      await qmetryFetch(
+        `/testcases/${encodeURIComponent(testcase_key)}/versions/${version_no}/steps/${step_id}`,
+        { method: "PUT", body: JSON.stringify(body) },
+      );
+      return textResult({ updated: true, testcase_key, version_no, step_id });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "delete_step",
+  {
+    description: "Elimina un paso específico de un Test Case en QMetry. El step_id se obtiene con get_testcase_steps.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave o UID del test case"),
+      version_no: z.number().describe("Número de versión del test case"),
+      step_id: z.number().describe("ID numérico del paso a eliminar"),
+    }),
+  },
+  async ({ testcase_key, version_no, step_id }) => {
+    try {
+      await qmetryFetch(
+        `/testcases/${encodeURIComponent(testcase_key)}/versions/${version_no}/steps/${step_id}`,
+        { method: "DELETE" },
+      );
+      return textResult({ deleted: true, testcase_key, version_no, step_id });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+// ── Requerimientos ────────────────────────────────────────────────────────────
+
+server.registerTool(
+  "unlink_requirement",
+  {
+    description: "Desvincula un requerimiento (issue de Jira) de un Test Case en QMetry.",
+    inputSchema: z.object({
+      testcase_key: z.string().describe("Clave del test case en QMetry"),
+      version_no: z.number().describe("Número de versión del test case"),
+      jira_issue_id: z.number().describe("ID numérico del issue de Jira a desvincular"),
+    }),
+  },
+  async ({ testcase_key, version_no, jira_issue_id }) => {
+    try {
+      await qmetryFetch(
+        `/testcases/${encodeURIComponent(testcase_key)}/version/${version_no}/requirements/unlink`,
+        { method: "PUT", body: JSON.stringify({ requirementIds: [jira_issue_id] }) },
+      );
+      return textResult({ unlinked: true, testcase_key, version_no, jira_issue_id });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+// ── Test Cycles — gestión y ejecución ─────────────────────────────────────────
+
+server.registerTool(
+  "update_testcycle",
+  {
+    description: "Actualiza el resumen, descripción o fechas de un Test Cycle existente en QMetry.",
+    inputSchema: z.object({
+      testcycle_key: z.string().describe("Clave o UID del Test Cycle en QMetry"),
+      summary: z.string().optional().describe("Nuevo nombre del ciclo"),
+      description: z.string().optional().describe("Nueva descripción"),
+      start_date: z.string().optional().describe("Fecha de inicio real, formato YYYY-MM-DD"),
+      end_date: z.string().optional().describe("Fecha de fin real, formato YYYY-MM-DD"),
+      planned_start_date: z.string().optional().describe("Fecha de inicio planificada, formato YYYY-MM-DD"),
+      planned_end_date: z.string().optional().describe("Fecha de fin planificada, formato YYYY-MM-DD"),
+    }),
+  },
+  async ({ testcycle_key, summary, description, start_date, end_date, planned_start_date, planned_end_date }) => {
+    try {
+      const body = {};
+      if (summary !== undefined) body.summary = summary;
+      if (description !== undefined) body.description = description;
+      if (start_date !== undefined) body.startDate = start_date;
+      if (end_date !== undefined) body.endDate = end_date;
+      if (planned_start_date !== undefined) body.plannedStartDate = planned_start_date;
+      if (planned_end_date !== undefined) body.plannedEndDate = planned_end_date;
+      await qmetryFetch(`/testcycles/${encodeURIComponent(testcycle_key)}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      return textResult({ updated: true, testcycle_key });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "unlink_testcases_from_cycle",
+  {
+    description: "Desvincula uno o más Test Cases de un Test Cycle en QMetry.",
+    inputSchema: z.object({
+      testcycle_key: z.string().describe("Clave o UID del Test Cycle"),
+      testcases: z
+        .array(
+          z.object({
+            testcase_uid: z.string().describe("UID del test case"),
+            version_no: z.number(),
+          }),
+        )
+        .describe("Lista de test cases a desvincular del ciclo"),
+    }),
+  },
+  async ({ testcycle_key, testcases }) => {
+    try {
+      await qmetryFetch(`/testcycles/${encodeURIComponent(testcycle_key)}/testcases`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          testCases: testcases.map((t) => ({ id: t.testcase_uid, versionNo: t.version_no })),
+        }),
+      });
+      return textResult({ unlinked: true, testcycle_key, count: testcases.length });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "update_execution",
+  {
+    description: "Actualiza el resultado de ejecución (Pass/Fail/Blocked) de un Test Case dentro de un Test Cycle. El execution_id se obtiene con search_cycle_executions.",
+    inputSchema: z.object({
+      testcycle_key: z.string().describe("Clave o UID del Test Cycle"),
+      testcase_key: z.string().describe("Clave del Test Case ejecutado"),
+      execution_id: z.number().describe("ID numérico de la ejecución (campo 'id' de search_cycle_executions)"),
+      status: z.string().describe("Resultado: 'Pass'|'Fail'|'Blocked'|'Not Executed'|'In Progress'"),
+      comment: z.string().optional().describe("Comentario o evidencia del resultado"),
+    }),
+  },
+  async ({ testcycle_key, testcase_key, execution_id, status, comment }) => {
+    try {
+      const body = { status };
+      if (comment !== undefined) body.comment = comment;
+      await qmetryFetch(
+        `/testcycles/${encodeURIComponent(testcycle_key)}/testcases/${encodeURIComponent(testcase_key)}/executions/${execution_id}`,
+        { method: "PUT", body: JSON.stringify(body) },
+      );
+      return textResult({ updated: true, testcycle_key, testcase_key, execution_id, status });
     } catch (err) {
       return errorResult(err);
     }
