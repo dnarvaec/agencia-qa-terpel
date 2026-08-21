@@ -1,0 +1,126 @@
+{
+  "story_id": "25062",
+  "story_title": "SAP - Servicio creación de EDS que envia SAP",
+  "uploaded_at": "2026-08-20T22:27:38Z",
+  "mode": "test_plans",
+  "plan_id": 117818,
+  "plan_name": "TEST SUITE GENERAL TERPEL POS",
+  "suite_id": 283888,
+  "suite_name": "HU-25062 - SAP - Servicio creación de EDS que envia SAP",
+  "azure_devops_url": "https://dev.azure.com/ecopetrolad/AP31TP-TERPEL-POS/_testPlans/execute?planId=117818&suiteId=283888",
+  "summary": {
+    "total_local": 12,
+    "total_uploaded": 12,
+    "total_errors": 0
+  },
+  "cases": [
+    {
+      "id_local": "TC-001",
+      "id_azure": 283889,
+      "title": "Creación exitosa de EDS con todos los campos requeridos (vía SAP)",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-002",
+      "id_azure": 283891,
+      "title": "Asignación automática de país y departamento por ciudad",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-003",
+      "id_azure": 283892,
+      "title": "Campos dirección, correo y teléfono pueden quedar vacíos si SAP no los envía",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-004",
+      "id_azure": 283893,
+      "title": "Validación de obligatoriedad de los campos requeridos",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-005",
+      "id_azure": 283894,
+      "title": "Intento de creación de EDS sin autenticación (sin token) — retorna 401",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-006",
+      "id_azure": 283895,
+      "title": "Creación de EDS con campo 'format' vacío — valida error de negocio",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-007",
+      "id_azure": 283896,
+      "title": "Intento de creación con código de EDS (logisticCenter) ya existente — valida unicidad",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-008",
+      "id_azure": 283897,
+      "title": "Creación de cola en datalake MDM para la EDS creada",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-009",
+      "id_azure": 283898,
+      "title": "Contrato técnico del servicio es respetado en errores y respuestas",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-010",
+      "id_azure": 283899,
+      "title": "Creación manual de EDS debe mantenerse para afiliadas (NO SAP)",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-011",
+      "id_azure": 283900,
+      "title": "Consulta de EDS integradas desde SAP en la gestión/configuración web",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    },
+    {
+      "id_local": "TC-012",
+      "id_azure": 283901,
+      "title": "Modificación de campos de EDS traída de SAP desde la interfaz (edición y restricciones)",
+      "type": "api",
+      "priority": "alta",
+      "status": "uploaded",
+      "error": null
+    }
+  ]
+}

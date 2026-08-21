@@ -314,22 +314,30 @@ Guarda `suite_id`.
 
 **Paso B3 — Crear Test Cases en el plan**
 
-**CRÍTICO: el patrón es crear(TC-001) → actualizar(TC-001) → crear(TC-002) → actualizar(TC-002) → ... NUNCA crear todos primero.**
+> ⚠️ **REGLA NO NEGOCIABLE — un solo Test Case por turno de herramientas**: está terminantemente prohibido incluir más de una llamada de creación de Test Case (`testplan_create_test_case`) en el mismo mensaje/turno de `tool_calls`. El sistema **bloquea en código** cualquier llamada adicional a esta herramienta (o a `wit_work_items_link` de vinculación a la HU) hasta que hayas fijado la Descripción del Test Case recién creado — no es solo una recomendación, la llamada bloqueada literalmente no se ejecuta contra Azure DevOps. Procesa los casos **uno por uno, de forma estrictamente secuencial**: 3a → 3b → 3c de `TC-001` primero, y solo entonces continúa con `TC-002`.
 
-Para cada caso del JSON:
+> ⚠️ **Importante sobre el schema de `testplan_create_test_case`**: a diferencia de `wit_update_work_item` (que acepta un `fields: {...}` genérico con nombres de referencia como `System.Description`), esta herramienta tiene **sus propios parámetros nativos de nivel superior** (por ejemplo `title`, `steps`, `priority`, `areaPath`, `iterationPath`, etc. — revisa el schema exacto que te expone la herramienta). **La Descripción (`System.Description`) NO persiste de forma confiable si se envía dentro de esta llamada** — por eso el Paso 3b (que usa `wit_update_work_item`, comprobado confiable en Modo B) es **obligatorio siempre, incondicionalmente**, no solo cuando la verificación falla.
 
-**3a.** Llama `azure-devops/testplan_create_test_case` con solo el título:
+Para cada caso del JSON, en un turno de herramientas dedicado y exclusivo para ese caso:
+
+**3a.** Llama `azure-devops/testplan_create_test_case` usando los parámetros nativos que exponga el schema real de la herramienta (título, pasos, prioridad, área/iteración, y campos de automatización si el schema los admite). Incluye como mínimo:
 
 ```
 project: AZURE_DEVOPS_PROJECT
 planId: {plan_id}
 suiteId: {suite_id}
 title: "{tc.id} - {tc.title}"
+steps: {pasos de tc.steps en el formato que exponga el schema de la herramienta —
+        puede ser un array estructurado de {action, expectedResult} en vez de XML;
+        usa el formato nativo, no fuerces la sintaxis XML de wit_update_work_item aquí}
+priority: {1 si alta, 2 si media, 3 si baja}
+areaPath: AZURE_DEVOPS_PROJECT
+iterationPath: AZURE_DEVOPS_PROJECT
 ```
 
-Guarda el `azure_id` devuelto. Luego **inmediatamente** — antes de crear el siguiente caso — llama `azure-devops/wit_update_work_item` para ese `azure_id`:
+No intentes pasar la descripción en esta llamada. Guarda el `azure_id` devuelto.
 
-**3b.** Llama `azure-devops/wit_update_work_item`:
+**3b. OBLIGATORIO E INCONDICIONAL — nunca lo omitas, nunca lo hagas condicional a un resultado previo.** Inmediatamente después de 3a, en el mismo turno o el siguiente, llama `azure-devops/wit_update_work_item`:
 
 ```
 id: {azure_id}
@@ -346,22 +354,6 @@ fields:
     <p><b>Trazabilidad — Criterio:</b> {tc.derivation_trace.quote}</p>
     <p><b>Trazabilidad — Origen:</b> {tc.derivation_trace.observed_in}</p>
 
-  Microsoft.VSTS.TCM.Steps: |
-    <steps id="0" last="{número total de pasos}">
-      {para cada step de tc.steps, IDs DEBEN empezar en 1: NUNCA usar id=0}
-      <step id="{número_del_step_empezando_en_1}" type="ActionStep">
-        <parameterizedString isformatted="false">{step.action} | Datos: {step.data}</parameterizedString>
-        <parameterizedString isformatted="false">{step.expected_result}</parameterizedString>
-        <description/>
-      </step>
-    </steps>
-
-  Microsoft.VSTS.Common.Priority: {1 si alta, 2 si media, 3 si baja}
-  Microsoft.VSTS.Common.ValueArea: "Business"
-  System.AreaPath: "AZURE_DEVOPS_PROJECT"
-  System.IterationPath: "AZURE_DEVOPS_PROJECT"
-  System.State: "Design"
-
   Microsoft.VSTS.TCM.AutomationStatus: {"Planned" si web o api, "Not Automated" si manual}
   Microsoft.VSTS.TCM.AutomatedTestName: {tc.id si web o api, omitir si manual}
   Microsoft.VSTS.TCM.AutomatedTestType: {"Playwright" si web, "API" si api, omitir si manual}
@@ -372,10 +364,18 @@ fields:
     <p><b>Observado en:</b> {tc.derivation_trace.observed_in}</p>
 ```
 
-**Notas importantes sobre el update:**
+No repitas aquí `Microsoft.VSTS.TCM.Steps` (ya quedó fijado en 3a por el parámetro nativo `steps`) para no arriesgarte a sobreescribirlo con un formato distinto.
+
+**3c.** Verificación de confirmación: llama `azure-devops/wit_get_work_item` con `id: {azure_id}` y `fields: ["System.Description", "Microsoft.VSTS.TCM.Steps"]`.
+
+- Si ambos vienen con contenido: el caso quedó correctamente cargado, continúa con el siguiente TC.
+- Si `System.Description` sigue vacío: repite el Paso 3b una vez más (mismo payload). Si `Microsoft.VSTS.TCM.Steps` sigue vacío, llama adicionalmente `azure-devops/testplan_update_test_case_steps` con `id: {azure_id}` y el bloque de steps.
+- Si tras el reintento algo sigue vacío, marca el caso como `"status": "partial"` con `"error": "No se pudo persistir descripción/pasos tras reintento"` en el reporte final (Paso C) — **nunca lo reportes como `uploaded` si en Azure DevOps quedó solo con el título.**
+
+**Notas importantes sobre los campos:**
 
 - **NO incluir `System.Tags`** — el usuario no tiene permisos para crear tags nuevos en este proyecto. Omitir ese campo completamente.
-- Si el update devuelve error en algún campo específico, reintenta el update **omitiendo solo ese campo** y registra en `status: "partial"` qué campos no se pudieron establecer.
+- Si la creación/actualización devuelve error en algún campo específico, reintenta **omitiendo solo ese campo** y registra en `status: "partial"` qué campos no se pudieron establecer.
 - Los valores válidos para `AutomationStatus` son exactamente: `"Planned"`, `"Not Automated"`, `"Automated"` (con espacios, no camelCase).
 
 **Paso B3c — Vincular Test Cases a la HU ⚠️ OBLIGATORIO**

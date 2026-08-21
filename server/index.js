@@ -118,9 +118,16 @@ app.post('/api/save-draft', async (req, res) => {
 
     const generatedFiles = [relPath];
 
+    // Los reportes de confirmación de carga a Azure (-azure-upload.json) los construye
+    // el propio agente; este endpoint nunca debe regenerar su .md (evita corromperlo
+    // con la plantilla de casos de prueba si el payload trae un `casos_prueba`/`cases`).
+    const isAzureUploadFile = relPath.endsWith('-azure-upload.json');
+
     // 2. Si el agente es 'mejorar-hu', actualizar la descripción en el Markdown (.md)
     const normalizedId = (agentId || '').toLowerCase().replace(/[\s]+/g, '-');
-    if (normalizedId === 'mejorar-hu' || relPath.endsWith('-final.json')) {
+    if (isAzureUploadFile) {
+      // No-op: el .md de confirmación no se regenera desde aquí.
+    } else if (normalizedId === 'mejorar-hu' || relPath.endsWith('-final.json')) {
       const mdRelPath = relPath.replace(/\.json$/, '.md');
       const absMd = path.resolve(WORKSPACE_ROOT, mdRelPath);
       const hu = content;

@@ -81,6 +81,29 @@ const TOOL_NAME_MAP = [
 
 const COMPLEX_FILTER_SERVERS = new Set(['azure-devops']);
 
+// Tools que se limitan a 1 llamada real por turno de asistente, sin importar cuántas
+// incluya el modelo en el mismo mensaje. Evita que el LLM "batchee" varias creaciones
+// de Test Case en Azure DevOps Test Plans y se salte la verificación/actualización
+// intermedia (comportamiento observado: crea 12 Test Cases en un solo turno y nunca
+// llama a la verificación) — ver /memories/repo/agente-casos-prueba.md.
+const SEQUENTIAL_ONLY_TOOL_PATTERNS = [/testplan_test_case_write$/];
+
+function isSequentialOnlyTool(toolName) {
+  return SEQUENTIAL_ONLY_TOOL_PATTERNS.some((re) => re.test(toolName));
+}
+
+// Tras crear un Test Case de Test Plan, la Description no persiste de forma confiable
+// (el schema propio del tool no la soporta bien); wit_update_work_item sí lo hace
+// (probado en el Modo B). Por eso se OBLIGA a llamar una de estas tools antes de
+// permitir avanzar a otra creación o al vínculo con la HU.
+const MUST_FOLLOW_UP_TOOL_PATTERNS = [/testplan_test_case_write$/];
+const FOLLOW_UP_CLEARING_PATTERNS = [/wit_update_work_item$/, /wit_work_item_write$/];
+const BLOCKED_UNTIL_FOLLOW_UP_PATTERNS = [/testplan_test_case_write$/, /wit_work_item_link_write$/];
+
+function matchesAny(patterns, toolName) {
+  return patterns.some((re) => re.test(toolName));
+}
+
 const PREFIX_MAP = {
   start:        '[AGENTE]  ',
   info:         '[INFO]    ',
@@ -413,6 +436,7 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   // Acumuladores de tokens — response.usage los provee Azure OpenAI en cada llamada
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let totalCachedTokens = 0; // tokens de prompt servidos desde cache (facturados con descuento) — solo visibilidad, no afecta el comportamiento
 
   // Rastreo de guardado de archivos para forzar el paso de guardado si el modelo
   // termina con 'stop' sin haber llamado workspace__writeFile.
@@ -425,6 +449,11 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
   // Detector de bucle — rastrea iteraciones consecutivas con tool calls idénticos
   let sameToolCallStreak = 0;
   let lastToolCallSignature = null;
+
+  // ── Secuencialidad real para flujos "crear N elementos" (ej. Test Cases de Test Plan) ──
+  let expectedSequentialCount = null; // total esperado, inferido del primer JSON local leído con test_cases/casos_prueba/cases
+  let sequentialToolCallCount = 0;    // veces que se ejecutó con éxito una tool "1-por-turno"
+  let mustFixDescriptionNext = false; // ¿queda pendiente fijar Description antes de seguir?
 
   try {
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
@@ -492,11 +521,13 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
       // ── Tokens de esta iteración ────────────────────────────────────────────
       if (response.usage) {
         const u = response.usage;
+        const cachedTokens = u.prompt_tokens_details?.cached_tokens || 0;
         totalPromptTokens += u.prompt_tokens || 0;
         totalCompletionTokens += u.completion_tokens || 0;
+        totalCachedTokens += cachedTokens;
         onProgress({
           type: 'info',
-          message: `📊 Tokens iter ${iter + 1}: prompt=${u.prompt_tokens} │ completion=${u.completion_tokens} │ total=${u.total_tokens}`,
+          message: `📊 Tokens iter ${iter + 1}: prompt=${u.prompt_tokens} (cache=${cachedTokens}) │ completion=${u.completion_tokens} │ total=${u.total_tokens}`,
         });
       }
 
@@ -519,6 +550,22 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
 
       // ── Fin de ejecución ─────────────────────────────────────────────────
       if (choice.finish_reason === 'stop' || !msg.tool_calls || msg.tool_calls.length === 0) {
+        // Si aún faltan elementos por procesar en un flujo "1-por-turno" (ej. Test Cases
+        // de Test Plan), NO permitir que el agente termine ni pregunte al usuario —
+        // forzar continuación autónoma sin importar qué haya respondido en texto.
+        if (expectedSequentialCount !== null && sequentialToolCallCount < expectedSequentialCount) {
+          const remaining = expectedSequentialCount - sequentialToolCallCount;
+          onProgress({
+            type: 'info',
+            message: `📌 El agente se detuvo con ${sequentialToolCallCount}/${expectedSequentialCount} elementos procesados — forzando continuación autónoma (faltan ${remaining})…`,
+          });
+          messages.push({
+            role: 'user',
+            content: `NO te detengas ni pidas confirmación: llevas ${sequentialToolCallCount} de ${expectedSequentialCount} Test Cases procesados. Eres un agente 100% autónomo — continúa AHORA MISMO, sin preguntar nada, con el siguiente Test Case (crear → fijar Description → verificar → vincular a la HU) hasta completar los ${expectedSequentialCount} casos.`,
+          });
+          continue;
+        }
+
         // Si el agente ya hizo trabajo pero NO guardó archivos, forzar el paso de guardado.
         // Solo lo hacemos una vez (injectedSaveStep evita bucle infinito).
         if (hasCalledAnyTool && !hasWrittenFiles && !injectedSaveStep && !hasExecutedCommand) {
@@ -541,9 +588,10 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         onProgress({ type: 'complete', message: `✅ Agente completó la ejecución en ${elapsed}s.` });
+        const cachePct = totalPromptTokens > 0 ? ((totalCachedTokens / totalPromptTokens) * 100).toFixed(1) : '0.0';
         onProgress({
           type: 'info',
-          message: `📊 Tokens totales: prompt=${totalPromptTokens} │ completion=${totalCompletionTokens} │ TOTAL=${totalPromptTokens + totalCompletionTokens}`,
+          message: `📊 Tokens totales: prompt=${totalPromptTokens} (cache=${totalCachedTokens}, ${cachePct}%) │ completion=${totalCompletionTokens} │ TOTAL=${totalPromptTokens + totalCompletionTokens}`,
         });
         completed = true;
         break;
@@ -559,11 +607,57 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
           (mcpCount > 0 ? ` (${mcpCount} MCP)` : '') + '…',
       });
 
+      // Rastrea, dentro de este turno, qué tools "1-por-turno" ya se ejecutaron —
+      // ver SEQUENTIAL_ONLY_TOOL_PATTERNS más arriba.
+      const seenSequentialTools = new Set();
+      let blockedSequentialCount = 0;
+      let blockedFollowUpCount = 0;
+
       for (const toolCall of msg.tool_calls) {
 
         // ── VERIFICACIÓN DE CANCELACIÓN 2 ──
         if (signal && signal.aborted) {
           throw { name: 'AbortError', message: 'Ejecución abortada por el usuario.' };
+        }
+
+        // ── Bloqueo real de "Description pendiente" (independiente del prompt) ──
+        // Tras crear un Test Case de Test Plan, no se permite crear otro ni vincularlo
+        // a la HU hasta que se llame a wit_update_work_item/wit_work_item_write para
+        // fijar su Description — ver MUST_FOLLOW_UP_TOOL_PATTERNS más arriba.
+        if (mustFixDescriptionNext && matchesAny(BLOCKED_UNTIL_FOLLOW_UP_PATTERNS, toolCall.function.name)) {
+          blockedFollowUpCount++;
+          onProgress({
+            type: 'warning',
+            message: `⛔ Bloqueada "${toolCall.function.name}": falta fijar la Description del Test Case recién creado antes de continuar.`,
+          });
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: 'BLOQUEADO por el sistema: primero debes llamar a wit_update_work_item (o wit_work_item_write) con el campo System.Description completo para el Test Case que acabas de crear. Esta llamada NO se ejecutó.',
+          });
+          continue;
+        }
+
+        // ── Límite real de secuencialidad (independiente del prompt) ──────────
+        // Si el modelo intenta llamar una tool "1-por-turno" más de una vez en el
+        // mismo mensaje, solo se ejecuta la primera; el resto se rechaza sin
+        // ejecutarse para forzar que el modelo espere el resultado (y verifique)
+        // antes de repetirla en un turno posterior.
+        if (isSequentialOnlyTool(toolCall.function.name)) {
+          if (seenSequentialTools.has(toolCall.function.name)) {
+            blockedSequentialCount++;
+            onProgress({
+              type: 'warning',
+              message: `⛔ Bloqueada llamada duplicada a "${toolCall.function.name}" en el mismo turno (máx. 1 por turno) — se fuerza secuencialidad real.`,
+            });
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: 'BLOQUEADO por el sistema: no está permitido más de 1 llamada a esta herramienta por turno. Esta llamada NO se ejecutó ni tuvo ningún efecto. En tu próximo turno, primero verifica con wit_get_work_item el Test Case que acabas de crear/actualizar (Description y Steps deben tener contenido) y corrígelo si falta algo; recién después continúa con el siguiente Test Case, de uno en uno.',
+            });
+            continue;
+          }
+          seenSequentialTools.add(toolCall.function.name);
         }
 
         let args;
@@ -607,6 +701,15 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
               hasWrittenFiles = true;
               if (args.path) writtenFilesSet.add(args.path);
             }
+            // Inferir cuántos elementos hay que procesar en un flujo "1-por-turno"
+            // a partir del primer JSON local leído que declare test_cases/casos_prueba/cases.
+            if (toolShortName === 'readFile' && expectedSequentialCount === null) {
+              try {
+                const parsed = JSON.parse(result);
+                const arr = parsed.test_cases || parsed.casos_prueba || parsed.cases;
+                if (Array.isArray(arr) && arr.length > 0) expectedSequentialCount = arr.length;
+              } catch (_) { /* no era JSON parseable — se ignora */ }
+            }
             onProgress({
               type: 'tool-result',
               message: `← [workspace] ${String(result).substring(0, 500)}${String(result).length > 500 ? '\n…(truncado)' : ''}`,
@@ -638,12 +741,39 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
           onProgress({ type: 'tool-error', message: `✗ ${toolCall.function.name}: ${toolErr.message}` });
         }
 
+        // Actualizar el estado de secuencialidad real solo si la llamada NO fue un error.
+        if (!String(toolResultContent).startsWith('Error')) {
+          if (matchesAny(MUST_FOLLOW_UP_TOOL_PATTERNS, toolCall.function.name)) {
+            mustFixDescriptionNext = true;
+          } else if (matchesAny(FOLLOW_UP_CLEARING_PATTERNS, toolCall.function.name)) {
+            mustFixDescriptionNext = false;
+          }
+          if (isSequentialOnlyTool(toolCall.function.name)) {
+            sequentialToolCallCount++;
+          }
+        }
+
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
           content: toolResultContent,
         });
       } // fin for toolCall
+
+      // Refuerzo explícito cuando se bloquearon llamadas por el límite de secuencialidad —
+      // se añade una sola vez por turno, después de resolver todos los tool_calls.
+      if (blockedSequentialCount > 0) {
+        messages.push({
+          role: 'user',
+          content: `RECORDATORIO DEL SISTEMA: se bloquearon ${blockedSequentialCount} llamada(s) porque intentaste ejecutar más de 1 creación/actualización de Test Case de Test Plan en el mismo turno. El límite es estrictamente 1 por turno. Ahora verifica con wit_get_work_item el Test Case recién creado (Description y Steps deben tener contenido real); si falta algo, corrígelo con wit_update_work_item y, si persiste, con testplan_update_test_case_steps. Solo después de confirmar que quedó completo, continúa con el siguiente Test Case — uno a la vez, nunca en batch.`,
+        });
+      }
+      if (blockedFollowUpCount > 0) {
+        messages.push({
+          role: 'user',
+          content: `RECORDATORIO DEL SISTEMA: se bloquearon ${blockedFollowUpCount} llamada(s) porque intentaste avanzar (crear otro Test Case o vincularlo a la HU) sin antes fijar la Description del Test Case recién creado. Llama AHORA a wit_update_work_item con el campo System.Description completo (y el resto de campos del Paso 3b) para ese Test Case antes de cualquier otra acción.`,
+        });
+      }
 
       // ── Detector de bucle de herramientas ─────────────────────────────────
       if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -682,9 +812,10 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
       if (injectedSaveStep && saveStepIter >= 10) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         onProgress({ type: 'complete', message: `✅ Agente completó la ejecución en ${elapsed}s.` });
+        const cachePct = totalPromptTokens > 0 ? ((totalCachedTokens / totalPromptTokens) * 100).toFixed(1) : '0.0';
         onProgress({
           type: 'info',
-          message: `📊 Tokens totales: prompt=${totalPromptTokens} │ completion=${totalCompletionTokens} │ TOTAL=${totalPromptTokens + totalCompletionTokens}`,
+          message: `📊 Tokens totales: prompt=${totalPromptTokens} (cache=${totalCachedTokens}, ${cachePct}%) │ completion=${totalCompletionTokens} │ TOTAL=${totalPromptTokens + totalCompletionTokens}`,
         });
         completed = true;
         break;
@@ -697,9 +828,10 @@ async function runAgent({ agentName, prompt, onProgress, signal }) {
         type: 'warning',
         message: `⚠️ Límite de ${MAX_ITERATIONS} iteraciones alcanzado (${elapsed}s). El agente puede no haber terminado.`,
       });
+      const cachePct = totalPromptTokens > 0 ? ((totalCachedTokens / totalPromptTokens) * 100).toFixed(1) : '0.0';
       onProgress({
         type: 'info',
-        message: `📊 Tokens acumulados: prompt=${totalPromptTokens} │ completion=${totalCompletionTokens} │ TOTAL=${totalPromptTokens + totalCompletionTokens}`,
+        message: `📊 Tokens acumulados: prompt=${totalPromptTokens} (cache=${totalCachedTokens}, ${cachePct}%) │ completion=${totalCompletionTokens} │ TOTAL=${totalPromptTokens + totalCompletionTokens}`,
       });
     }
 

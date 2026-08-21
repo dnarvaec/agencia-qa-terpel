@@ -1,236 +1,307 @@
 # Casos de Prueba — HU-25062: SAP - Servicio creación de EDS que envia SAP
 
-**Fecha de generación:** 2024-06-18T21:25:00Z
+**Fecha de generación:** 2024-06-28T00:00:00Z
 
 ## Entorno
-| Web |
-| --- |
-| N/A (solo API, ver API_URL en contexto) |
+| Web | Api |
+| --- | --- |
+| N/A (alcance sólo API) | [object Object] |
 
 ## Credenciales
 | Usuario | Rol | Contraseña |
 |---------|-----|------------|
-| N/A | (ver .env) | (ver .env) |
+| <API_PUBLIC_KEY> | api_consumer | <definido en .env> |
 
 ## Resumen
 | Total Web | Total API | Total Manual | Total |
 |-----------|-----------|--------------|-------|
-| 0 | 8 | 1 | 9 |
+| 0 | 10 | 2 | 12 |
 
 ## Casos de Prueba
 
 ---
 
-### Creación exitosa de EDS recibida de SAP (todas las reglas de integración y asignación automática)
+### Creación exitosa de EDS con todos los campos requeridos (vía SAP)
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros (integración SAP-HO) | La EDS ingresada mediante API debe reflejar los datos con asignación automática según las reglas del negocio y retornar la estructura de respuesta exitosa estándar. |
+| api | alta | api_consumer | Confirmar que la EDS se crea correctamente y el código SAP es reflejado en la respuesta. |
 
 **Descripción:**
-Validar que al recibir una EDS desde SAP vía API POST /api/sap/logisticsCenter, se integra en el sistema, se asignan país y departamento automáticamente según ciudad, y se crean los registros faltantes (dirección, correo, teléfono) vacíos, permitiendo su actualización posterior.
+Se valida la creación de una nueva EDS integrando todos los campos requeridos desde SAP. El sistema debe almacenar los datos y reflejar el código único proveniente de SAP.
 
 **Precondiciones:**
-- Contar con credenciales API válidas y acceso autorizado (Token SSO con API_PUBLIC_KEY, API_URL consultable)
-- Disponibilidad de los datos mínimos requeridos provenientes de SAP para la creación de una EDS
+- Contar con API_PUBLIC_KEY válido configurado en el .env.
+- Autenticarse correctamente para obtener token SSO válido.
+- El código de centro logístico no existe previamente en el sistema.
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Generar token SSO con API_PUBLIC_KEY por POST a {SSO_URL}/api/v1/authentication/generate-token | Body: {"public_key": "<valor API_PUBLIC_KEY>"} | Se recibe token válido (status=200, tiene campo token). |
-| 2 | Consumir endpoint POST /api/sap/logisticsCenter con datos proporcionados por SAP en el body y el Bearer token en Authorization. | Body: logisticCenter, logisticName, logisticCenterType, regional, companyCode, customer, cashBook, costCenter, profitCenter, city, edscod, format, status, modificationDate, modificationHour (según estructura) | Respuesta status 200 y objeto data con empresaId numérico y el código del centro logístico; país y departamento asignados según ciudad; dirección, correo y teléfono vacíos. |
-| 3 | Consultar la persistencia de la EDS creada a través del mismo endpoint o consulta secundaria | Consulta por el código SAP (logisticCenter) de la EDS | La EDS creada está registrada con país y departamento asociados y los campos (dirección, correo, teléfono) en blanco/listos para completar. |
+| 1 | Obtener token SSO vía POST /api/v1/authentication/generate-token | Headers: application/json, Body: { public_key: <API_PUBLIC_KEY> } | HTTP 200 con campo 'token' válido en la respuesta |
+| 2 | Consumir endpoint POST /api/sap/logisticsCenter | Headers: Authorization: Bearer <token>, Body: payload válido con todos los campos obligatorios | HTTP 200. En el body, el campo 'data.logistic_center' es igual al enviado y el status es 200. |
 
 **Post-condición:**
-La EDS queda persistida en el sistema HO con los campos integrados según reglas de negocio.
+La EDS está registrada en el sistema con todos sus datos, el código es visible y único.
 
 ---
 
-### Creación de EDS con campo obligatorio vacío (caso campo format vacío)
+### Asignación automática de país y departamento por ciudad
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | El endpoint debe validar que ningún campo obligatorio esté vacío y responder con el error correspondiente. |
+| api | alta | api_consumer | Garantizar que país y departamento se obtienen en base a la ciudad informada y se almacenan correctamente. |
 
 **Descripción:**
-Validar que el API rechaza la creación de una EDS cuando un campo obligatorio (ejemplo: format) se encuentra vacío, retornando un error HTTP 400 y estructura de error.
+Valida que al enviar únicamente ciudad, el sistema asigna automáticamente país y departamento en el registro de EDS.
 
 **Precondiciones:**
-- Token de autenticación SSO válido
-- Preparar payload con algún campo obligatorio vacío (format='')
+- Contar con un token SSO válido.
+- Payload de creación de EDS solo incluye la ciudad (sin país ni departamento).
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Generar token SSO válido | Body: {"public_key": "<API_PUBLIC_KEY>"} | Token recibido (200). |
-| 2 | Intentar POST /api/sap/logisticsCenter enviando algún campo obligatorio vacío (ej: format=''), incluye el token en Authorization. | Body con todos los campos, pero format='' | Respuesta status 400 y estructura: { code: 'INVALID_BODY_CONTENT', message: [...], status: 400 } |
+| 1 | Obtener token SSO restante si es necesario. | Ver fixture de autenticación API | Token válido obtenido |
+| 2 | Consumir POST /api/sap/logisticsCenter con sólo ciudad informada (sin país/departamento) | Body como en ejemplo válido de data/logisticsCenter.json | HTTP 200. En la base de datos, país y departamento asignados de acuerdo a la ciudad enviada. |
 
 **Post-condición:**
-La EDS no es creada ni persistida por regla de negocio.
+El registro de la EDS contiene país y departamento asignados automáticamente conforme a la ciudad.
 
 ---
 
-### Intento de creación EDS sin token de autenticación (401)
+### Campos dirección, correo y teléfono pueden quedar vacíos si SAP no los envía
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | El endpoint debe rechazar las peticiones no autenticadas devolviendo HTTP 401 y estructura de error AUTHENTICATION_ERROR. |
+| api | alta | api_consumer | Confirmar que la creación de EDS funciona dejando estos campos vacíos y que luego pueden actualizarse manualmente. |
 
 **Descripción:**
-Verificar que no es posible crear una EDS en el sistema si no se proporciona el token Bearer en Authorization.
+Se prueba que la omisión de los campos dirección, correo o teléfono en el payload no impide la creación de la EDS.
 
 **Precondiciones:**
-- Preparar payload válido para POST /api/sap/logisticsCenter, pero no incluir cabecera Authorization.
+- Token SSO válido obtenido.
+- Payload sin los campos dirección/correo/teléfono.
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Consumir el endpoint /api/sap/logisticsCenter sin token Bearer | Payload válido, sin cabecera Authorization | Respuesta HTTP 401 con cuerpo: { tipoError: 'NOT_PAUTHORIZED', code: 'AUTHENTICATION_ERROR', message: 'DOES NOT HAVE PERMISSIONS', status: 401 } |
+| 1 | Obtener token SSO. | SSO flow. | Token válido. |
+| 2 | Consumir POST /api/sap/logisticsCenter sin los campos dirección, correo, teléfono. | Payload omitido (ver esquema logisticsCenter) | HTTP 200, la EDS es creada sin esos campos poblados. Luego pueden setearse manualmente por otro flujo fuera de este endpoint. |
 
 **Post-condición:**
-No se crea ninguna EDS, petición rechazada por autenticación.
+EDS creada exitosamente, dirección, correo y teléfono pueden ser completados después en interfaz manual.
 
 ---
 
-### Validación campo logisticCenterType — solo valores permitidos
+### Validación de obligatoriedad de los campos requeridos
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | El API solo debe aceptar logisitcCenterType conforme a catálogo permitido; otros valores generan respuesta HTTP 400. |
+| api | alta | api_consumer | Comprobar robustez en el backend ante la omisión de campos requeridos. |
 
 **Descripción:**
-Verificar que el campo logisticCenterType solo admite los valores permitidos (DEUNA, EDS, KCO, TDC), rechazando cualquier otro valor.
+Se valida que se obtenga HTTP 400 cuando falta algún campo obligatorio en el payload.
 
 **Precondiciones:**
-- Token Bearer SSO válido
-- Payload para POST /api/sap/logisticsCenter con campo logisticCenterType fuera del catálogo
+- Token SSO válido disponible.
+- Payload incompleto (ver data/logisticsCenter.json > missingFields)
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Generar token válido | Body: {"public_key": "<API_PUBLIC_KEY>"} | Token recibido (200) |
-| 2 | POST /api/sap/logisticsCenter con logisticCenterType='INVALID_TYPE' | Payload válido salvo campo logisitcCenterType | Response código 400, code: 'INVALID_BODY_CONTENT' y mensaje sobre valor inválido de logisticCenterType |
+| 1 | Obtener token válido si es requerido. | SSO | Token válido |
+| 2 | POST /api/sap/logisticsCenter con campos omitidos. | Payload: missingFields | HTTP 400 con code INVALID_BODY_CONTENT y message con nombres de campos requeridos faltantes. |
 
 **Post-condición:**
-Petición rechazada, EDS no creada si campo fuera de catálogo.
+La EDS no es creada en el sistema.
 
 ---
 
-### Consulta de EDS integradas vía endpoint de consulta
+### Intento de creación de EDS sin autenticación (sin token) — retorna 401
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | Demostrar que una EDS creada puede ser recuperada y todos sus datos importantes pueden visualizarse tras la integración. |
+| api | alta | api_consumer | Validar seguridad por autenticación obligada. |
 
 **Descripción:**
-Validar que sea posible consultar las EDS integradas (creadas) por SAP mediante el endpoint de consulta correspondiente según código logístico.
+Se verifica que el endpoint rechaza intentos de creación sin token Bearer.
 
 **Precondiciones:**
-- EDS previamente creada e integrada vía POST /api/sap/logisticsCenter
-- Credenciales y token válidos de acceso API
+- No enviar header Authorization.
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Obtener token SSO válido | public_key (contexto) | Token (200) recibido |
-| 2 | Invocar endpoint de consulta EDS con el código creado | GET /api/sap/logisticsCenter?logisticCenter=XXXX | Respuesta HTTP 200, estructura JSON con datos exactos de la EDS integrada |
+| 1 | Consumir API POST /api/sap/logisticsCenter sin header Authorization. | Payload válido pero sin token. | HTTP 401 y mensaje de AUTHENTICATION_ERROR en el body (estructura definida en contexto.md) |
 
 **Post-condición:**
-La información de la EDS puede verificarse consistentemente mediante consulta API.
+La EDS no es creada y la respuesta señala falta de permisos.
 
 ---
 
-### Edición de EDS integrada: todos los campos excepto centro logístico (regla), centro logístico solo retoma
+### Creación de EDS con campo 'format' vacío — valida error de negocio
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | La edición debe cumplir la restricción de bloqueo sobre centro logístico salvo excepción (retoma de MASSER a Franquicia) |
+| api | alta | api_consumer | Comprobar que la API no acepta strings vacíos para campos opcionales cuando la validación sí aplica. |
 
 **Descripción:**
-Validar que es posible modificar cualquier campo de una EDS integrada desde SAP excepto el centro logístico, el cual solo puede modificarse en casos de retoma entre compañías.
+Verifica rechazo (400) si se envía el campo format explícitamente vacío, aun siendo opcional.
 
 **Precondiciones:**
-- EDS previamente creada vía API
-- Token y credenciales API válidas
+- Token válido.
+- Payload incluye field format: '' (ver data.logisticsCenter.json > emptyFormat)
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Obtener token SSO válido | public_key API_PUBLIC_KEY | Token emitido OK (200) |
-| 2 | Invocar endpoint de modificación EDS (ejemplo: PATCH /api/sap/logisticsCenter/{logisticCenter}) solo modificando campos distintos del centro logístico | Body con campos modificados | La EDS actualiza todos los campos distintos de centro logístico y retorna status 200 |
-| 3 | Intentar modificar centro logístico salvo caso retoma (de MASSER a Franquicia) | PATCH con centro logístico distinto | Solo permite modificación si corresponde a caso retoma; si no, rechaza modificación (HTTP 400/403) |
+| 1 | Obtener token válido. | SSO | Token válido. |
+| 2 | POST /api/sap/logisticsCenter con format vacío (''). | Payload: emptyFormat | HTTP 400 con code INVALID_BODY_CONTENT. |
 
 **Post-condición:**
-Solo los campos permitidos pueden ser modificados; centro logístico salvo excepciones.
+No se crea la EDS cuando format=''.
 
 ---
 
-### Creación/edición EDS afiliada directamente
+### Intento de creación con código de EDS (logisticCenter) ya existente — valida unicidad
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | Asegurar que las funcionalidades anteriores de afiliadas se mantienen a pesar de la integración nueva. |
+| api | alta | api_consumer | Asegurar integridad referencial por código único asignado por SAP. |
 
 **Descripción:**
-Verificar que sigue disponible la funcionalidad de creación de EDS para estaciones afiliadas directamente en el HO, usando el endpoint habitual.
+Se valida que no es posible crear dos EDS con el mismo código logisticCenter.
 
 **Precondiciones:**
-- Credenciales y token API válidos
-- Payload válido para creación de EDS afiliada
+- EDS con el código logisticCenter existe previamente.
+- Payload válido pero con código duplicado.
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Generar token SSO válido API_PUBLIC_KEY | POST generate-token | Token 200 recibido |
-| 2 | Consumir POST /api/sap/logisticsCenter con campo format='Afiliada' y resto según reglas | Body completo, campo format=Afiliada | Respuesta HTTP 200 exitosa; EDS afiliada creada como antes. |
+| 1 | Obtener token válido. | SSO | Token válido. |
+| 2 | POST /api/sap/logisticsCenter con código ya existente. | Payload: igual a la EDS ya existente. | HTTP 400 (o mensaje de error específico de unicidad según backend). |
 
 **Post-condición:**
-La creación de EDS afiliada sigue funcional sin afectación por nueva integración SAP-HO.
+No se permite duplicidad de EDS, integridad garantizada por código.
 
 ---
 
-### Asociación correcta de regional en reportería
+### Creación de cola en datalake MDM para la EDS creada
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Responsable de datos maestros | Asegurar la asociación visible de regional en los reportes y consultas del sistema. |
+| api | alta | api_consumer | Asegurar cumplimiento de trazabilidad de EDS creadas desde SAP. |
 
 **Descripción:**
-Verificar que, al crear o consultar una EDS, la regional asignada aparece y es trazable en reportería (campo regional).
+Verifica que tras la creación exitosa de EDS, se genera un registro/cola de trazabilidad en el datalake.
 
 **Precondiciones:**
-- EDS creada e integrada correctamente
-- Acceso al endpoint de reportería/consulta
+- EDS creada exitosamente por SAP (ver TC-001).
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Obtener EDS creada por código logístico usando consulta/reportería | Código EDS registrado | En response JSON, campo regional está asociado y es visible para la EDS correspondiente. |
+| 1 | Crear EDS por API según TC-001 (precondición, mock o llamada real). | Payload válido. | HTTP 200, EDS creada. |
+| 2 | Verificar en el datalake MDM existencia de cola para la EDS creada. | Consultar sistema externo o mock. | Existe registro de trazabilidad en MDM para la EDS nueva. |
 
 **Post-condición:**
-La EDS relacionada siempre refleja la regional asociada en reportes y consultas.
+Cola MDM actualizada con nueva EDS.
 
 ---
 
-### Creación de cola en datalake MDM al crear EDS
+### Contrato técnico del servicio es respetado en errores y respuestas
 
 | Tipo | Prioridad | Rol | Objetivo |
 |------|-----------|-----|---------|
-| api | alta | Administrador de MDM SAP / Operaciones | Trazabilidad de la EDS mediante la cola generada en el datalake, validación en sistemas externos. |
+| api | alta | api_consumer | Asegurar estandarización en la interfaz y facilidad de integración. |
 
 **Descripción:**
-Verificar que con cada EDS creada se genera la cola correspondiente en el datalake de MDM, asegurando la trazabilidad corporativa fuera del sistema bajo prueba.
+Valida que todas las respuestas (éxito y error) siguen la estructura JSON de contrato.
 
 **Precondiciones:**
-- Una EDS fue creada correctamente mediante la API o flujo de integración SAP-HO
-- Acceso a logs del datalake de MDM o herramienta equivalente
+- Preparar varios escenarios (creación válida, error 400 y error 401).
 
 **Pasos:**
 | # | Acción | Datos de prueba | Resultado Esperado |
 |---|--------|----------------|-------------------|
-| 1 | Acceder al datalake de MDM con usuario administrativo autorizado | Usuario MDM/logs | Acceso garantizado a logs y colas creadas. |
-| 2 | Buscar la cola generada para la EDS, asociada al código logístico (ID EDS) | Código logístico/metadata de EDS | Existe registro en datalake de la cola MDM para la EDS recién creada, con trazabilidad/fecha/hora. |
+| 1 | Ejecutar POST válido (como en TC-001). | Payload válido | Estructura: { message, status, data: {empresaId, logistic_center} } |
+| 2 | Ejecutar POST con campos faltantes. | Payload inválido | Estructura: { code, message[], status } y status=400 |
+| 3 | Ejecutar POST sin header Authorization. | Payload válido sin token | Estructura: { tipoError, code, message, status } y status=401 |
 
 **Post-condición:**
-La EDS tiene vinculo/trazabilidad en la infraestructura de MDM externo.
+Todos los flujos cumplen contrato técnico (esquema estándar).
+
+---
+
+### Creación manual de EDS debe mantenerse para afiliadas (NO SAP)
+
+| Tipo | Prioridad | Rol | Objetivo |
+|------|-----------|-----|---------|
+| api | alta | api_consumer | Evitar regresión en la funcionalidad de creación manual de EDS. |
+
+**Descripción:**
+Confirma que el endpoint de creación manual de EDS por fuera de SAP sigue activo y funcional.
+
+**Precondiciones:**
+- Existencia funcional del endpoint/manual de creación de EDS para afiliadas.
+
+**Pasos:**
+| # | Acción | Datos de prueba | Resultado Esperado |
+|---|--------|----------------|-------------------|
+| 1 | Consumir endpoint/manual para crear EDS afiliada (no SAP). | Payload de EDS afiliada. | EDS afiliada creada exitosamente. |
+
+**Post-condición:**
+EDS afiliadas pueden seguir creándose sin emplear SAP.
+
+---
+
+### Consulta de EDS integradas desde SAP en la gestión/configuración web
+
+| Tipo | Prioridad | Rol | Objetivo |
+|------|-----------|-----|---------|
+| api | alta | rol_usuario_gestor | Asegurar que la consulta/proyección UI de EDS SAP sea completa y veraz. |
+
+**Descripción:**
+El usuario debe poder visualizar y consultar todas las EDS integradas desde SAP en la gestión desde la interfaz web.
+
+**Precondiciones:**
+- Usuario autenticado en HO con permisos de gestión de EDS.
+- EDS ya creadas desde SAP.
+- Acceso a la interfaz de gestión de EDS.
+
+**Pasos:**
+| # | Acción | Datos de prueba | Resultado Esperado |
+|---|--------|----------------|-------------------|
+| 1 | Navegar y autenticar usuario en web de HO. | Usuario y contraseña HO. | Usuario autenticado y acceso a menú de gestión. |
+| 2 | Acceder a gestión/configuración de EDS. | Menú correspondiente. | Listado de EDS integradas desde SAP visible. |
+
+**Post-condición:**
+EDS SAP visibles en la interfaz y consultables.
+
+---
+
+### Modificación de campos de EDS traída de SAP desde la interfaz (edición y restricciones)
+
+| Tipo | Prioridad | Rol | Objetivo |
+|------|-----------|-----|---------|
+| api | alta | rol_usuario_gestor | Comprobar reglas de edición según origen y condición retoma. |
+
+**Descripción:**
+Verifica que los campos de EDS proveniente de SAP pueden editarse salvo centro logístico (a excepción de retomas), y la regional puede modificarse.
+
+**Precondiciones:**
+- Acceso a la interfaz de gestión/configuración de EDS como usuario con permisos de edición.
+- EDS SAP ya integrada.
+
+**Pasos:**
+| # | Acción | Datos de prueba | Resultado Esperado |
+|---|--------|----------------|-------------------|
+| 1 | Autenticarse en la plataforma web de HO. | Usuario y clave. | Ingreso a la pantalla principal. |
+| 2 | Seleccionar EDS proveniente de SAP para edición. | Buscar y seleccionar EDS de la lista. | Ficha de edición visible con campos editables y no editables según regla. |
+| 3 | Confirmar que sólo los campos permitidos pueden ser modificados y la regional es editable. | Intentar modificar cada campo. | Centro logístico solo editable si EDS fue retomada (MASSER a franquicia). Regional editable siempre. |
+
+**Post-condición:**
+Sólo las reglas descritas de edición se cumplen por la UI.
 

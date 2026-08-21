@@ -262,9 +262,12 @@ function finishRun(success, errorMsg, files) {
   }
 
   // El editor interactivo solo aplica cuando la tarea fue crear/mejorar un borrador local.
-  // Si el prompt indica una publicación a Azure, saltar directamente al resultado.
-  const isAzurePublish = /\b(sub[ie]r|upload|publicar|work.?item|test.?plan|comentario)\b/i.test(currentPrompt);
+  // Los archivos de confirmación de carga a Azure (-azure-upload.json) NUNCA deben previsualizarse:
+  // no son un borrador editable, son un reporte de resultado. Se detecta por nombre de archivo
+  // (determinístico) en vez de solo confiar en el texto del prompt del usuario.
   const jsonPath = findJsonFile(files || []);
+  const isAzureUploadFile = !!jsonPath && /-azure-upload\.json$/i.test(jsonPath);
+  const isAzurePublish = isAzureUploadFile || /\b(sub[ie]r|sube|subiendo|carga[r]?|upload|publicar|work.?item|test.?plan|comentario)\b/i.test(currentPrompt);
   if (jsonPath && !isAzurePublish) {
     openInteractiveEditor(jsonPath, files, agentSelect.value);
   } else {
